@@ -1,6 +1,6 @@
-# Habit Tracker — end-to-end infrastructure proof
+# Habit Tracker — profile milestone and infrastructure proof
 
-This repository deliberately contains **no habit-tracking features**. It is one narrow vertical slice proving that an authenticated physical Android device can call FastAPI, persist and re-read data in Supabase PostgreSQL, and receive a real remote notification sent by FastAPI through Expo Push Service and FCM.
+This repository contains the first independently testable product milestone: authenticated profiles, globally unique canonical usernames, and exact username lookup. It also retains the infrastructure proof showing that an authenticated physical Android device can call FastAPI, persist and re-read data in Supabase PostgreSQL, and receive a real remote notification sent by FastAPI through Expo Push Service and FCM. Habits and social relationships are not implemented yet.
 
 ## Architecture
 
@@ -68,7 +68,53 @@ No database password or Firebase private credential belongs in the mobile `.env`
    supabase db push
    ```
 
-   The exact SQL is `supabase/migrations/202610050001_infrastructure_proof.sql`. If CLI access is unavailable, copy that entire file into **Supabase Dashboard → SQL Editor → New query → Run**; no hand-authored GUI tables are required.
+   The CLI applies both migrations in timestamp order, including `supabase/migrations/202610050002_profiles.sql`. If CLI access is unavailable, run each unapplied migration in filename order in **Supabase Dashboard → SQL Editor → New query → Run**; do not edit a migration that was already applied.
+
+### Profile onboarding and API
+
+The onboarding sequence is deliberately explicit: (1) sign up or sign in with Supabase email/password, (2) send that session's access token to `POST /profiles/me`, then (3) use the authenticated read, update, and search endpoints. Existing Supabase Auth users simply receive `profile_not_found` until they perform step 2; there is no signup trigger, generated username, or email/password copy in `profiles`.
+
+Every endpoint requires `Authorization: Bearer <SUPABASE_ACCESS_TOKEN>`:
+
+| Endpoint | Request | Success | Expected errors |
+|---|---|---|---|
+| `POST /profiles/me` | `{"username":" Alice_1 ","display_name":" Alice ","timezone":"Asia/Jerusalem"}` | `201`, full profile | `409 profile_already_exists`, `409 username_taken` |
+| `GET /profiles/me` | none | `200`, full profile | `404 profile_not_found` |
+| `PATCH /profiles/me` | Any non-empty subset, e.g. `{"display_name":"Alice H."}` | `200`, full profile | `404 profile_not_found`, `409 username_taken`, `422` invalid/empty input |
+| `GET /profiles/search?username=alice_1` | query parameter | `200` with only `user_id`, `username`, `display_name` | `404` for absent/self match or incomplete onboarding; `422` invalid username |
+
+A full profile response has `user_id`, `username`, `display_name`, `timezone`, `created_at`, and `updated_at`. Identity and timestamps are server-managed: supplying `user_id`, `created_at`, `updated_at`, null required values, or any unknown field is rejected. PATCH is atomic and omitted fields remain unchanged.
+
+Usernames are trimmed, lowercased, then must contain 3–30 ASCII lowercase letters, digits, or underscores. PostgreSQL also enforces canonical form and uniqueness, so concurrent claims cannot both succeed. Display names are trimmed Unicode strings of 1–80 characters. Timezones must be names accepted by Python's IANA timezone database, including `UTC` and `Asia/Jerusalem`; the backend installs `tzdata` so Render does not depend on the host's timezone package. Search uses the same username normalization and performs only an exact match. It never lists users, returns partial suggestions, or exposes email, timezone, timestamps, or Auth metadata.
+
+### Test profiles with two existing Auth users (PowerShell)
+
+No APK or mobile change is needed. In Supabase Dashboard, create/confirm two email/password users if needed. Sign each one in through the public Auth API, then call the deployed (or local) FastAPI service:
+
+```powershell
+$SupabaseUrl = "https://YOUR_PROJECT_REF.supabase.co"
+$PublishableKey = "sb_publishable_..."
+$ApiUrl = "https://YOUR_SERVICE.onrender.com" # or http://127.0.0.1:8000
+
+function Get-AccessToken($Email, $Password) {
+  $headers = @{ apikey = $PublishableKey; "Content-Type" = "application/json" }
+  $body = @{ email = $Email; password = $Password } | ConvertTo-Json
+  (Invoke-RestMethod -Method Post -Uri "$SupabaseUrl/auth/v1/token?grant_type=password" -Headers $headers -Body $body).access_token
+}
+
+$Token1 = Get-AccessToken "USER1_EMAIL" "USER1_PASSWORD"
+$Token2 = Get-AccessToken "USER2_EMAIL" "USER2_PASSWORD"
+$Headers1 = @{ Authorization = "Bearer $Token1"; "Content-Type" = "application/json" }
+$Headers2 = @{ Authorization = "Bearer $Token2"; "Content-Type" = "application/json" }
+
+Invoke-RestMethod -Method Post -Uri "$ApiUrl/profiles/me" -Headers $Headers1 -Body (@{ username="Alice_1"; display_name="Alice"; timezone="Asia/Jerusalem" } | ConvertTo-Json)
+Invoke-RestMethod -Method Post -Uri "$ApiUrl/profiles/me" -Headers $Headers2 -Body (@{ username="Bob_2"; display_name="Bob"; timezone="UTC" } | ConvertTo-Json)
+Invoke-RestMethod -Method Get -Uri "$ApiUrl/profiles/me" -Headers $Headers1
+Invoke-RestMethod -Method Patch -Uri "$ApiUrl/profiles/me" -Headers $Headers1 -Body (@{ display_name="Alice H." } | ConvertTo-Json)
+Invoke-RestMethod -Method Get -Uri "$ApiUrl/profiles/search?username=BOB_2" -Headers $Headers1
+```
+
+To verify enforcement after applying the migration, confirm that the first search returns only three fields; PATCH User 2's username to `ALICE_1` and expect `409 username_taken`; search for `bob` and for User 1's own `alice_1` and expect 404. In the SQL editor, test client access inside a transaction with `set local role authenticated; select * from public.profiles;` and expect permission denied, then `rollback`. The automated API suite uses isolated in-memory dependency replacements and never touches Supabase. A disposable Supabase/PostgreSQL environment is still required to integration-test the migration's constraints, trigger, foreign key cascade, grants, and RLS; this repository does not point tests at a shared project.
 
 ## Backend local development and tests
 
@@ -176,4 +222,4 @@ Open EAS's build link on the phone, download/install the APK, and approve Androi
 
 ## Deliberate limitations
 
-This proof stores Expo ticket IDs but does not poll Expo receipts or implement scheduled token cleanup. Expo ticket acceptance and actual Android display are distinct; the real-phone procedure is the delivery test. There are no habits, streaks, profiles, social features, or polished production UX.
+This proof stores Expo ticket IDs but does not poll Expo receipts or implement scheduled token cleanup. Expo ticket acceptance and actual Android display are distinct; the real-phone procedure is the delivery test. Profiles and exact username search are implemented, but there are no habits, streaks, friendships, sharing, excuses, social notifications, or polished production UX.
