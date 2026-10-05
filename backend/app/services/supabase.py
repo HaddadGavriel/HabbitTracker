@@ -5,6 +5,14 @@ import httpx
 from ..config import Settings
 
 
+class ProfileAlreadyExists(Exception):
+    pass
+
+
+class UsernameTaken(Exception):
+    pass
+
+
 class SupabaseDatabase:
     def __init__(self, settings: Settings):
         self.base_url = f"{settings.supabase_url.rstrip('/')}/rest/v1"
@@ -75,3 +83,63 @@ class SupabaseDatabase:
                 json={"status": status, "expo_ticket_id": ticket_id, "push_requested_at": datetime.now(timezone.utc).isoformat()},
             )
         response.raise_for_status()
+
+    @staticmethod
+    def _raise_profile_conflict(response: httpx.Response) -> None:
+        if response.status_code != 409:
+            response.raise_for_status()
+            return
+        try:
+            error_text = " ".join(str(response.json().get(key, "")) for key in ("message", "details", "hint"))
+        except ValueError:
+            response.raise_for_status()
+            return
+        if "profiles_pkey" in error_text:
+            raise ProfileAlreadyExists
+        if "profiles_username_key" in error_text:
+            raise UsernameTaken
+        response.raise_for_status()
+
+    async def create_profile(self, user_id: str, values: dict[str, str]) -> dict:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(
+                f"{self.base_url}/profiles",
+                headers={**self.headers, "Prefer": "return=representation"},
+                json={"user_id": user_id, **values},
+            )
+        self._raise_profile_conflict(response)
+        return response.json()[0]
+
+    async def get_profile(self, user_id: str) -> dict | None:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(
+                f"{self.base_url}/profiles",
+                headers=self.headers,
+                params={"user_id": f"eq.{user_id}", "select": "user_id,username,display_name,timezone,created_at,updated_at", "limit": "1"},
+            )
+        response.raise_for_status()
+        rows = response.json()
+        return rows[0] if rows else None
+
+    async def update_profile(self, user_id: str, values: dict[str, str]) -> dict | None:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.patch(
+                f"{self.base_url}/profiles",
+                headers={**self.headers, "Prefer": "return=representation"},
+                params={"user_id": f"eq.{user_id}"},
+                json=values,
+            )
+        self._raise_profile_conflict(response)
+        rows = response.json()
+        return rows[0] if rows else None
+
+    async def search_profile(self, username: str) -> dict | None:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(
+                f"{self.base_url}/profiles",
+                headers=self.headers,
+                params={"username": f"eq.{username}", "select": "user_id,username,display_name", "limit": "1"},
+            )
+        response.raise_for_status()
+        rows = response.json()
+        return rows[0] if rows else None
