@@ -15,7 +15,7 @@ This app targets **Expo SDK 57**. A development build is a custom debug app cont
 
 ## 2. Install tools, align SDK dependencies, and link EAS
 
-Install Node.js 20 or later, then run:
+Install Node.js 22.13 or newer, then run:
 
 ```bash
 npm install --global eas-cli
@@ -29,7 +29,21 @@ eas init
 
 `npx expo install --fix` is Expo's dependency-alignment tool; it should report the committed React, React Native, Router, and Expo modules as compatible with SDK 57. During `eas init`, create or select the Expo project. Copy the project UUID it reports (also visible under **expo.dev → project → Project settings → Project ID**).
 
-The dynamic `mobile/app.config.ts` reads that UUID from `EXPO_PUBLIC_EAS_PROJECT_ID`. For subsequent local EAS commands in this shell, set it once:
+The dynamic `mobile/app.config.ts` reads that UUID from `EXPO_PUBLIC_EAS_PROJECT_ID`. For subsequent local EAS commands in this shell, set it once.
+
+**Windows PowerShell:**
+
+```powershell
+$env:EXPO_PUBLIC_EAS_PROJECT_ID="YOUR_EAS_PROJECT_UUID"
+```
+
+**Windows CMD:**
+
+```cmd
+set EXPO_PUBLIC_EAS_PROJECT_ID=YOUR_EAS_PROJECT_UUID
+```
+
+**bash/zsh:**
 
 ```bash
 export EXPO_PUBLIC_EAS_PROJECT_ID=YOUR_EAS_PROJECT_UUID
@@ -69,11 +83,10 @@ Select the project/build credentials, then **Google Service Account → Manage y
 
 ## 5. Build and install the APK
 
-Create the standalone preview build:
+Create the standalone preview build. If the project ID is not already set in the current shell, set it first using the command for your shell from step 2, then run:
 
 ```bash
 cd mobile
-export EXPO_PUBLIC_EAS_PROJECT_ID=YOUR_EAS_PROJECT_UUID
 eas build --platform android --profile preview
 ```
 
