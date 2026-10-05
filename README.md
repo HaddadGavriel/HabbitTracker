@@ -72,12 +72,27 @@ No database password or Firebase private credential belongs in the mobile `.env`
 
 ## Backend local development and tests
 
+**PowerShell:**
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements-dev.txt
+Copy-Item .env.example .env
+# fill private values in .env
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+**bash/zsh:**
+
 ```bash
 cd backend
 python -m venv .venv
-source .venv/bin/activate               # Windows PowerShell: .venv\Scripts\Activate.ps1
+source .venv/bin/activate
 pip install -r requirements-dev.txt
-cp .env.example .env                    # fill private values
+cp .env.example .env
+# fill private values in .env
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -96,6 +111,20 @@ Either create a **Blueprint** from `render.yaml`, or create a Render **Web Servi
 Set all backend/private variables above in **Render → Service → Environment**. Never paste Firebase service credentials into Render; Expo/EAS owns that connection. Deploy, then check `https://YOUR_SERVICE.onrender.com/health`. Put this HTTPS origin in `mobile/.env` and rebuild the APK.
 
 ## Mobile local development
+
+**PowerShell:**
+
+```powershell
+cd mobile
+Copy-Item .env.example .env
+# edit .env and place the local-only google-services.json
+npm install
+npx expo install --fix
+npx expo-doctor
+npx expo start --dev-client
+```
+
+**bash/zsh:**
 
 ```bash
 cd mobile
