@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "Infrastructure Test",
+    "slug": "habit-tracker-infrastructure-proof",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "habittrackerinfra",
+    "plugins": ["expo-router", "expo-notifications"],
+    "android": {
+      "package": "com.habittracker.infrastructureproof",
+      "googleServicesFile": "./google-services.json",
+      "permissions": ["POST_NOTIFICATIONS"]
+    },
+    "extra": {
+      "router": { "origin": false },
+      "eas": { "projectId": "REPLACE_WITH_EAS_PROJECT_ID" }
+    }
+  }
+}
