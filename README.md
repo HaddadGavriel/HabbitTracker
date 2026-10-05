@@ -25,7 +25,7 @@ The secret key exists only on the backend. PostgreSQL tables have RLS enabled an
 
 ## Required tools and accounts
 
-Install Git, Python 3.12, Node.js 20+, npm, [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started), and EAS CLI (`npm install --global eas-cli`). You need free/paid accounts as applicable for Supabase, Render, Expo, and Firebase, plus a physical Android phone. Expo Go is not the artifact used for this proof; build an APK with EAS.
+Install Git, Python 3.12, Node.js 22.13 or newer, npm, [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started), and EAS CLI (`npm install --global eas-cli`). You need free/paid accounts as applicable for Supabase, Render, Expo, and Firebase, plus a physical Android phone. Expo Go is not the artifact used for this proof; build an APK with EAS.
 
 ## Environment variables
 
