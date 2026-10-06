@@ -68,7 +68,7 @@ No database password or Firebase private credential belongs in the mobile `.env`
    supabase db push
    ```
 
-   The CLI applies migrations in timestamp order, including `supabase/migrations/202610050003_friendships.sql`. If CLI access is unavailable, run each unapplied migration in filename order in **Supabase Dashboard → SQL Editor → New query → Run**; do not edit a migration that was already applied.
+   The CLI applies migrations in timestamp order, including `supabase/migrations/202610050003_friendships.sql` and the send-race fix in `supabase/migrations/202610060001_friend_request_races.sql`. If CLI access is unavailable, run each unapplied migration in filename order in **Supabase Dashboard → SQL Editor → New query → Run**; do not edit a migration that was already applied. Disposable PostgreSQL test setup is documented in [`docs/friendships.md`](docs/friendships.md).
 
 ### Profile onboarding and API
 
