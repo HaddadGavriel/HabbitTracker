@@ -19,6 +19,11 @@ class RelationshipConflict(Exception):
         self.code = code
 
 
+class HabitError(Exception):
+    def __init__(self, code: str):
+        self.code = code
+
+
 class SupabaseDatabase:
     def __init__(self, settings: Settings):
         self.base_url = f"{settings.supabase_url.rstrip('/')}/rest/v1"
@@ -206,3 +211,34 @@ class SupabaseDatabase:
         response = await self._rpc("remove_friend", {"p_actor": user_id, "p_friend": friend_id})
         response.raise_for_status()
         return bool(response.json())
+
+    async def _habit_rpc(self, function: str, body: dict, *, many: bool = False):
+        response = await self._rpc(function, body)
+        if response.status_code >= 400:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            if isinstance(payload, dict) and payload.get("code") == "P0001" and payload.get("message") in {
+                "profile_not_found", "habit_archived", "invalid_habit_configuration",
+            }:
+                raise HabitError(payload["message"])
+        response.raise_for_status()
+        rows = response.json()
+        return rows if many else (rows[0] if rows else None)
+
+    async def create_habit(self, user_id: str, values: dict) -> dict:
+        return await self._habit_rpc("create_habit", {"p_owner": user_id, "p_config": values})
+
+    async def list_habits(self, user_id: str, status: str = "active") -> list[dict]:
+        return await self._habit_rpc("list_habits", {"p_owner": user_id, "p_status": status}, many=True)
+
+    async def get_habit(self, user_id: str, habit_id: str) -> dict | None:
+        return await self._habit_rpc("get_habit", {"p_owner": user_id, "p_habit": habit_id})
+
+    async def update_habit(self, user_id: str, habit_id: str, values: dict) -> dict | None:
+        return await self._habit_rpc("update_habit", {"p_owner": user_id, "p_habit": habit_id, "p_changes": values})
+
+    async def set_habit_archived(self, user_id: str, habit_id: str, archived: bool) -> dict | None:
+        function = "archive_habit" if archived else "restore_habit"
+        return await self._habit_rpc(function, {"p_owner": user_id, "p_habit": habit_id})

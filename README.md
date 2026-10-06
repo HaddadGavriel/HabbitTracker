@@ -223,3 +223,7 @@ Open EAS's build link on the phone, download/install the APK, and approve Androi
 ## Deliberate limitations
 
 This proof stores Expo ticket IDs but does not poll Expo receipts or implement scheduled token cleanup. Expo ticket acceptance and actual Android display are distinct; the real-phone procedure is the delivery test. Profiles, exact username search, and backend friendships are implemented, but there are no habits, streaks, sharing, excuses, social notifications, or polished production UX.
+
+## Private habit management
+
+The backend now supports private habit configuration, schedules, reminder settings, and archive/restore. See [the habit API guide](docs/habits.md) for endpoints, validation, timezone interpretation, PowerShell examples, migration steps, security, and disposable PostgreSQL tests. No occurrences or notification delivery are generated.
