@@ -165,12 +165,14 @@ class SupabaseDatabase:
         if response.status_code < 400:
             return
         try:
-            message = response.json().get("message", "")
+            error = response.json()
+            code = error.get("code")
+            message = error.get("message")
         except (ValueError, AttributeError):
             response.raise_for_status()
             return
-        codes = {"outgoing_request_exists", "incoming_request_exists", "friendship_exists", "recipient_not_found"}
-        if message in codes:
+        codes = {"outgoing_request_exists", "incoming_request_exists", "friendship_exists", "recipient_not_found", "profile_not_found", "self_request"}
+        if response.status_code == 400 and code == "P0001" and isinstance(message, str) and message in codes:
             raise RelationshipConflict(message)
         response.raise_for_status()
 

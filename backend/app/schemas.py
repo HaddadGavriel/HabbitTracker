@@ -105,6 +105,12 @@ class FriendRequestCreate(BaseModel):
     recipient_user_id: UUID
 
 
+class RelationshipMutation(BaseModel):
+    """Decisions and removal take no client-controlled values."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class PublicProfile(BaseModel):
     user_id: UUID
     username: str
