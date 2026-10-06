@@ -4,6 +4,7 @@ from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from uuid import UUID
 
 
 class DeviceRegistration(BaseModel):
@@ -97,3 +98,29 @@ class ProfileSearchResult(BaseModel):
     user_id: str
     username: str
     display_name: str
+
+
+class FriendRequestCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    recipient_user_id: UUID
+
+
+class PublicProfile(BaseModel):
+    user_id: UUID
+    username: str
+    display_name: str
+
+
+class RelationshipResult(BaseModel):
+    id: UUID
+    direction: Literal["incoming", "outgoing"]
+    state: Literal["pending", "accepted"]
+    profile: PublicProfile
+    created_at: datetime
+    updated_at: datetime
+    accepted_at: datetime | None = None
+
+
+class FriendRequestLists(BaseModel):
+    incoming: list[RelationshipResult]
+    outgoing: list[RelationshipResult]
