@@ -14,6 +14,11 @@ class UsernameTaken(Exception):
     pass
 
 
+class RelationshipConflict(Exception):
+    def __init__(self, code: str):
+        self.code = code
+
+
 class SupabaseDatabase:
     def __init__(self, settings: Settings):
         self.base_url = f"{settings.supabase_url.rstrip('/')}/rest/v1"
@@ -149,3 +154,53 @@ class SupabaseDatabase:
         response.raise_for_status()
         rows = response.json()
         return rows[0] if rows else None
+
+    async def _rpc(self, function: str, body: dict) -> httpx.Response:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(f"{self.base_url}/rpc/{function}", headers=self.headers, json=body)
+        return response
+
+    @staticmethod
+    def _relationship_error(response: httpx.Response) -> None:
+        if response.status_code < 400:
+            return
+        try:
+            message = response.json().get("message", "")
+        except (ValueError, AttributeError):
+            response.raise_for_status()
+            return
+        codes = {"outgoing_request_exists", "incoming_request_exists", "friendship_exists", "recipient_not_found"}
+        if message in codes:
+            raise RelationshipConflict(message)
+        response.raise_for_status()
+
+    async def send_friend_request(self, requester_id: str, recipient_id: str) -> dict:
+        response = await self._rpc("send_friend_request", {"p_requester": requester_id, "p_recipient": recipient_id})
+        self._relationship_error(response)
+        return response.json()[0]
+
+    async def list_friend_requests(self, user_id: str) -> list[dict]:
+        response = await self._rpc("list_friend_requests", {"p_user": user_id})
+        response.raise_for_status()
+        return response.json()
+
+    async def accept_friend_request(self, request_id: str, user_id: str) -> dict | None:
+        response = await self._rpc("accept_friend_request", {"p_request": request_id, "p_actor": user_id})
+        response.raise_for_status()
+        rows = response.json()
+        return rows[0] if rows else None
+
+    async def reject_friend_request(self, request_id: str, user_id: str) -> bool:
+        response = await self._rpc("reject_friend_request", {"p_request": request_id, "p_actor": user_id})
+        response.raise_for_status()
+        return bool(response.json())
+
+    async def list_friends(self, user_id: str) -> list[dict]:
+        response = await self._rpc("list_friends", {"p_user": user_id})
+        response.raise_for_status()
+        return response.json()
+
+    async def remove_friend(self, user_id: str, friend_id: str) -> bool:
+        response = await self._rpc("remove_friend", {"p_actor": user_id, "p_friend": friend_id})
+        response.raise_for_status()
+        return bool(response.json())
