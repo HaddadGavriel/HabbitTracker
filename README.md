@@ -1,6 +1,6 @@
-# Habit Tracker — profile milestone and infrastructure proof
+# Habit Tracker — friendships, profiles, and infrastructure proof
 
-This repository contains the first independently testable product milestone: authenticated profiles, globally unique canonical usernames, and exact username lookup. It also retains the infrastructure proof showing that an authenticated physical Android device can call FastAPI, persist and re-read data in Supabase PostgreSQL, and receive a real remote notification sent by FastAPI through Expo Push Service and FCM. Habits and social relationships are not implemented yet.
+This repository contains authenticated profiles, exact username lookup, friend requests, and mutual friendships. It also retains the Android infrastructure proof. The friendship API contract, migration notes, and a two-user PowerShell walkthrough are in [`docs/friendships.md`](docs/friendships.md).
 
 ## Architecture
 
@@ -68,7 +68,7 @@ No database password or Firebase private credential belongs in the mobile `.env`
    supabase db push
    ```
 
-   The CLI applies both migrations in timestamp order, including `supabase/migrations/202610050002_profiles.sql`. If CLI access is unavailable, run each unapplied migration in filename order in **Supabase Dashboard → SQL Editor → New query → Run**; do not edit a migration that was already applied.
+   The CLI applies migrations in timestamp order, including `supabase/migrations/202610050003_friendships.sql`. If CLI access is unavailable, run each unapplied migration in filename order in **Supabase Dashboard → SQL Editor → New query → Run**; do not edit a migration that was already applied.
 
 ### Profile onboarding and API
 
@@ -114,7 +114,7 @@ Invoke-RestMethod -Method Patch -Uri "$ApiUrl/profiles/me" -Headers $Headers1 -B
 Invoke-RestMethod -Method Get -Uri "$ApiUrl/profiles/search?username=BOB_2" -Headers $Headers1
 ```
 
-To verify enforcement after applying the migration, confirm that the first search returns only three fields; PATCH User 2's username to `ALICE_1` and expect `409 username_taken`; search for `bob` and for User 1's own `alice_1` and expect 404. In the SQL editor, test client access inside a transaction with `set local role authenticated; select * from public.profiles;` and expect permission denied, then `rollback`. The automated API suite uses isolated in-memory dependency replacements and never touches Supabase. A disposable Supabase/PostgreSQL environment is still required to integration-test the migration's constraints, trigger, foreign key cascade, grants, and RLS; this repository does not point tests at a shared project.
+To verify enforcement after applying the migration, confirm that the first search returns only three fields; PATCH User 2's username to `ALICE_1` and expect `409 username_taken`; search for `bob` and for User 1's own `alice_1` and expect 404. In the SQL editor, test client access inside a transaction with `set local role authenticated; select * from public.profiles;` and expect permission denied, then `rollback`. The ordinary API suite uses isolated dependency replacements and mocked HTTP transport and never touches Supabase. CI also creates disposable PostgreSQL, applies the migrations to a minimal Supabase-role scaffold, and verifies constraints, RLS, cascades, stale transitions, and concurrency. The scaffold does not emulate Supabase Auth or PostgREST and must never point at a shared project.
 
 ## Backend local development and tests
 
@@ -222,4 +222,4 @@ Open EAS's build link on the phone, download/install the APK, and approve Androi
 
 ## Deliberate limitations
 
-This proof stores Expo ticket IDs but does not poll Expo receipts or implement scheduled token cleanup. Expo ticket acceptance and actual Android display are distinct; the real-phone procedure is the delivery test. Profiles and exact username search are implemented, but there are no habits, streaks, friendships, sharing, excuses, social notifications, or polished production UX.
+This proof stores Expo ticket IDs but does not poll Expo receipts or implement scheduled token cleanup. Expo ticket acceptance and actual Android display are distinct; the real-phone procedure is the delivery test. Profiles, exact username search, and backend friendships are implemented, but there are no habits, streaks, sharing, excuses, social notifications, or polished production UX.
