@@ -2,9 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
-from .routers import devices, friends, infrastructure, profiles
+from .routers import devices, friends, habits, infrastructure, profiles
 
-app = FastAPI(title="Habit Tracker API", version="0.3.0")
+app = FastAPI(title="Habit Tracker API", version="0.4.0")
 settings = get_settings()
 app.add_middleware(
     CORSMiddleware,
@@ -17,6 +17,7 @@ app.include_router(devices.router)
 app.include_router(infrastructure.router)
 app.include_router(profiles.router)
 app.include_router(friends.router)
+app.include_router(habits.router)
 
 
 @app.get("/health")
