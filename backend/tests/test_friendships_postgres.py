@@ -282,7 +282,10 @@ def test_send_retries_when_conflicting_friendship_disappears(users):
                     sleep(0.01)
                 else:
                     pytest.fail("Send did not reach the controlled race window")
-                assert service("select public.remove_friend(%s,%s)", (b, a), True) == [(True,)]
+                # Normal removal now takes ordered profile locks and correctly
+                # waits for this send's KEY SHARE locks. Use administrator-only
+                # instrumentation to retain coverage of the internal retry path.
+                assert execute("delete from public.friend_relationships where id=%s returning id", (old,), True) == [(old,)]
             finally:
                 gate.execute("select pg_advisory_unlock(%s)", (lock_key,))
             rows = future.result(timeout=5)

@@ -29,6 +29,11 @@ class OccurrenceError(Exception):
         self.code = code
 
 
+class SharingError(Exception):
+    def __init__(self, code: str):
+        self.code = code
+
+
 class SupabaseDatabase:
     def __init__(self, settings: Settings):
         self.base_url = f"{settings.supabase_url.rstrip('/')}/rest/v1"
@@ -278,3 +283,38 @@ class SupabaseDatabase:
         }:
             raise OccurrenceError(row["error"])
         return row
+
+    async def _sharing_rpc(self, function: str, body: dict, *, many: bool = False):
+        response = await self._rpc(function, body)
+        if response.status_code == 400:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            if isinstance(payload, dict) and payload.get("code") == "P0001" and payload.get("message") in {
+                "profile_not_found", "self_share", "friendship_required",
+            }:
+                raise SharingError(payload["message"])
+        response.raise_for_status()
+        rows = response.json()
+        return rows if many else (rows[0] if rows else None)
+
+    async def grant_habit_share(self, user_id: str, habit_id: str, friend_id: str) -> dict | None:
+        return await self._sharing_rpc("grant_habit_share", {"p_owner": user_id, "p_habit": habit_id, "p_recipient": friend_id})
+
+    async def revoke_habit_share(self, user_id: str, habit_id: str, friend_id: str) -> bool | None:
+        owned = await self._sharing_rpc("revoke_habit_share", {
+            "p_owner": user_id, "p_habit": habit_id, "p_recipient": friend_id,
+        }, many=True)
+        return True if owned else None
+
+    async def list_habit_shares(self, user_id: str, habit_id: str) -> list[dict] | None:
+        # The scalar JSON RPC distinguishes an owned habit with no grants ([])
+        # from an absent or inaccessible habit (null).
+        return await self._sharing_rpc("list_habit_shares", {"p_owner": user_id, "p_habit": habit_id}, many=True)
+
+    async def list_shared_habits(self, user_id: str) -> list[dict]:
+        return await self._sharing_rpc("list_shared_habits", {"p_recipient": user_id}, many=True)
+
+    async def get_shared_habit(self, user_id: str, habit_id: str) -> dict | None:
+        return await self._sharing_rpc("get_shared_habit", {"p_recipient": user_id, "p_habit": habit_id})

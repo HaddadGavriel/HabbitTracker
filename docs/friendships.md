@@ -11,7 +11,7 @@ All routes require a validated Supabase bearer token **and** an existing profile
 | `POST /friend-requests/{id}/accept` | `200` accepted relationship | Recipient only. |
 | `POST /friend-requests/{id}/reject` | `204` | Recipient only; deletes the row. |
 | `GET /friends` | `200 []` | Accepted only, ordered by current username then relationship ID. |
-| `DELETE /friends/{friend_user_id}` | `204` | Either friend may delete an accepted relationship. |
+| `DELETE /friends/{friend_user_id}` | `204` | Either friend may delete an accepted relationship; all habit shares in both directions are deleted atomically. |
 
 Mutation paths return `404 friend_request_not_found` or `404 friendship_not_found` both when absent and when unauthorized, preventing inspection. Stale/already-decided requests use the same response. Malformed UUIDs and unexpected fields return `422`. Accept, reject, and remove take no body (an empty object or JSON null is also accepted); any body fields, including acting-user IDs, are rejected before a write. Missing onboarding returns `404 profile_not_found`; absent/invalid authentication returns `401`.
 
@@ -25,11 +25,18 @@ Mutation paths return `404 friend_request_not_found` or `404 friendship_not_foun
 
 Transitions are `absent → pending → accepted → absent`, or `absent → pending → absent` on rejection. Absence permits a new request. An unordered-pair unique index prevents duplicate/reverse rows. Backend-role-only functions classify send conflicts and perform conditional accept/reject/remove writes atomically. RLS has no client policies, and client roles lack table/function privileges.
 
+Friendship alone does not expose habits. Owners grant access to individual habits
+using the [sharing API](sharing.md). Each grant refers to the specific accepted
+relationship row. Removing that relationship deletes grants in both directions
+in the same transaction; accepting a new request later never restores old grants.
+Removal coordinates with sharing and occurrence reconciliation by locking the
+participating profile rows in UUID order before relationship rows.
+
 Sending uses PostgreSQL's default READ COMMITTED isolation. If a conflicting row is removed before it can be inspected, sending retries insertion rather than reporting a nonexistent incoming request. An existing row is locked while its conflict is classified. Profile key-share locks keep both participants present during sending; if the caller's profile disappears before this operation, the error remains `404 profile_not_found`. Concurrent accept/reject or repeated decisions have exactly one successful transition. Concurrent removal has one success and one `404`; removal deletes the current accepted pair and allows a fresh request.
 
 ## Migration and tests
 
-Apply committed migrations in filename order. New installations need all migrations; installations that already applied `202610050003_friendships.sql` need only `202610060001_friend_request_races.sql`. The new migration replaces only the send RPC and explicitly retains backend-only execution; it does not change existing rows or rewrite earlier migrations. For an approved infrastructure release, use `supabase db push` (or run each unapplied SQL file in order in the dashboard). Implementation and tests do not apply migrations to shared infrastructure.
+Apply committed migrations in filename order. New installations need all migrations; existing installations apply only unapplied files. `202610060001_friend_request_races.sql` replaces the send RPC and retains backend-only execution. The later [sharing migration](sharing.md#migration-and-tests) adds grant cleanup and coordinates friendship removal with sharing locks. Existing migrations are not rewritten. For an approved infrastructure release, use `supabase db push` (or run each unapplied SQL file in order in the dashboard). Implementation and tests do not apply migrations to shared infrastructure.
 
 `cd backend; python -m pytest -q` runs the API and mocked HTTP transport suite; PostgreSQL checks skip when `TEST_DATABASE_URL` is unset. CI creates PostgreSQL 16, applies `backend/tests/postgres_scaffold.sql`, applies every migration, and runs the integration suite. The scaffold deliberately grants API roles default table/function privileges so tests prove explicit revocations survive Supabase-like defaults. It contains only `auth.users(id)` and API roles. It verifies PostgreSQL constraints, RLS configuration, privileges, cascades, ordering, and actual concurrent transactions; it does not emulate Supabase Auth, the gateway, or PostgREST. A test-only trigger/advisory lock forces the send/delete race window and is removed after that test.
 
