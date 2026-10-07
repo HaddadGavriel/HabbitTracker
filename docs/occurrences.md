@@ -160,10 +160,14 @@ roles cannot call/replace the clock or access that schema.
 
 ## Migrations and testing
 
-Apply the new ordered migration `202610070002_daily_occurrences.sql` after merged
-PR #8's private habits migration, through a separately authorized deployment
-workflow. Previously applied migrations are unchanged. Deploy compatible backend
-code after the new migration; legacy habit/profile routes also use its triggers.
+Apply `202610070002_daily_occurrences.sql` after merged PR #8's private habits
+migration, followed by `202610070003_occurrence_write_deadline.sql`, through a
+separately authorized deployment workflow. If the occurrence migration is already
+applied, apply only the corrective migration. It rejects every owner assignment
+at the write-time deadline, including unchanged values, while allowing internal
+closure to persist missed state. Previously applied migrations are unchanged.
+Deploy compatible backend code after the migrations; legacy habit/profile routes
+also use their triggers.
 No shared database migration, deployment, or merge is part of this PR.
 
 Existing habits begin tracking at their owner-local date when the migration runs,

@@ -4,12 +4,19 @@ Production has no test clock input or client-accessible override mechanism.
 """
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 from uuid import uuid4
 
+import httpx
 import pytest
+from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 
+from app.auth import AuthenticatedUser, get_current_user
+from app.dependencies import get_database
+from app.main import app
+from test_friend_database_adapter import db, transport
 from test_friendships_postgres import URL, execute, execute_as, psycopg, service, users
 from test_habits_postgres import CONFIG, TARGET, create, lifecycle, patch
 
@@ -118,7 +125,10 @@ def test_progress_crossings_absolute_retry_and_delta_replay(users, clock):
     clock('2026-03-02 00:00+00')
     assert mutation(a, oid, 'adjustment', 12, 'request-1') == result
     assert mutation(a, oid, 'adjustment', 1, 'new') == {'error': 'occurrence_closed'}
-    assert occurrences(a)[0]['progress'] == 9
+    row = occurrences(a)[0]
+    assert (row['progress'], row['completed'], row['state']) == (9, False, 'missed')
+    assert execute('select key from public.occurrence_adjustments where occurrence_id=%s order by key',
+                   (oid,), True) == [('request-1',), ('request-2',)]
 
 
 @pytest.mark.parametrize("operation,value,key,error", [
@@ -278,19 +288,68 @@ def test_snapshot_identity_and_closed_progress_guards(users, clock):
         execute('update public.habit_occurrences set progress=1 where id=%s', (o['id'],))
 
 
-@pytest.mark.parametrize('config,operation,value', [(CONFIG, 'completion', True),
-    (TARGET, 'progress', 10), (TARGET, 'adjustment', 10)])
-def test_midnight_between_check_and_update_is_committed_conflict(users, clock, config, operation, value):
-    a = users[0]; create(a, config); oid = today(a)['occurrences'][0]['id']
+@pytest.mark.parametrize('config,initial,operation,value', [
+    pytest.param(CONFIG, False, 'completion', True, id='binary-complete'),
+    pytest.param(TARGET, 0, 'progress', 10, id='target-set'),
+    pytest.param(TARGET, 0, 'adjustment', 10, id='target-increment'),
+    pytest.param(CONFIG, False, 'completion', False, id='binary-incomplete-noop'),
+    pytest.param(TARGET, 3, 'progress', 3, id='target-incomplete-noop'),
+    pytest.param(TARGET, 3, 'adjustment', 0, id='target-zero-adjustment'),
+    pytest.param(CONFIG, True, 'completion', True, id='binary-completed-noop'),
+    pytest.param(TARGET, 10, 'progress', 10, id='target-completed-noop'),
+])
+def test_midnight_between_check_and_update_is_committed_conflict(
+    users, clock, monkeypatch, config, initial, operation, value,
+):
+    a = users[0]
+    # This earlier deadline is reconciled before the mutation's subtransaction.
+    # Its persisted missed state proves the rejected write did not roll it back.
+    zone(a, 'Asia/Tokyo'); sibling = create(a); zone(a, 'UTC')
+    sibling_before = next(o for o in occurrences(a) if o['habit_id'] == sibling['id'])
+    assert sibling_before['closes_at'] == '2026-03-01T15:00:00+00:00'
+    assert sibling_before['state'] == 'in_progress'
+    habit = create(a, config)
+    oid = next(o['id'] for o in today(a)['occurrences'] if o['habit_id'] == habit['id'])
+    before = mutation(a, oid, 'completion' if config['type'] == 'binary' else 'progress', initial)
     # An administrator-only test replacement advances at the UPDATE trigger,
     # deterministically reproducing the check/write race without waiting.
     execute("""create or replace function public.occurrence_now() returns timestamptz
         language sql volatile set search_path='' as $$
         select case when pg_catalog.pg_trigger_depth()>0 then '2026-03-02 00:00+00'::timestamptz
                     else '2026-03-01 23:59:59.999+00'::timestamptz end $$""")
-    assert mutation(a, oid, operation, value, 'midnight') == {'error': 'occurrence_closed'}
-    row = occurrences(a)[0]
-    assert row['state'] == 'missed' and row['progress'] == 0 and not row['completed']
+
+    # Use the real route and adapter; only PostgREST's HTTP transport is replaced
+    # with the actual disposable-database RPC running as service_role.
+    captured = []
+    key = 'midnight' if operation == 'adjustment' else None
+    def handler(request):
+        assert request.method == 'POST' and request.url.path == '/rest/v1/rpc/mutate_occurrence'
+        payload = json.loads(request.content)
+        assert payload == {'p_owner': str(a), 'p_occurrence': oid, 'p_operation': operation,
+                           'p_value': value, 'p_key': key}
+        result = mutation(payload['p_owner'], payload['p_occurrence'], payload['p_operation'],
+                          payload['p_value'], payload['p_key'])
+        captured.append(result)
+        return httpx.Response(200, json=[result])
+
+    route, field = {'completion': ('completion', 'completed'), 'progress': ('progress', 'progress'),
+                    'adjustment': ('progress-adjustments', 'delta')}[operation]
+    with monkeypatch.context() as patching:
+        transport(patching, handler)
+        patching.setitem(app.dependency_overrides, get_current_user, lambda: AuthenticatedUser(id=str(a)))
+        patching.setitem(app.dependency_overrides, get_database, db)
+        with TestClient(app) as client:
+            response = client.request('POST' if operation == 'adjustment' else 'PUT',
+                f'/occurrences/{oid}/{route}', json={field: value},
+                headers={'Idempotency-Key': key} if key else {})
+    assert captured == [{'error': 'occurrence_closed'}]
+    assert response.status_code == 409
+    assert response.json() == {'detail': {'code': 'occurrence_closed', 'message': 'Occurrence is closed'}}
+    rows = {o['id']: o for o in occurrences(a)}
+    row = rows[oid]
+    assert (row['progress'], row['completed']) == (before['progress'], before['completed'])
+    assert row['state'] == ('completed' if before['completed'] else 'missed')
+    assert rows[sibling_before['id']]['state'] == 'missed'
     assert execute('select count(*) from public.occurrence_adjustments where occurrence_id=%s', (oid,), True) == [(0,)]
 
 
@@ -378,13 +437,15 @@ def test_migration_existing_habits_cutover_not_creation_date():
             scaffold = (root / 'backend/tests/postgres_scaffold.sql').read_text()
             c.execute('\n'.join(line for line in scaffold.splitlines() if not line.startswith('create role ')))
             migrations = sorted((root / 'supabase/migrations').glob('*.sql'))
-            for migration in migrations[:-1]: c.execute(migration.read_text())
+            cutover = next(i for i, migration in enumerate(migrations)
+                           if migration.name == '202610070002_daily_occurrences.sql')
+            for migration in migrations[:cutover]: c.execute(migration.read_text())
             owner = uuid4()
             c.execute('insert into auth.users values(%s)', (owner,))
             c.execute("insert into public.profiles(user_id,username,display_name,timezone) values(%s,'cutover','Cutover','UTC')", (owner,))
             c.execute("insert into public.habits(owner_id,configuration,created_at) values(%s,%s,'2020-01-01') returning id", (owner, Jsonb(CONFIG)))
             habit = c.fetchone()[0]
-            c.execute(migrations[-1].read_text())
+            for migration in migrations[cutover:]: c.execute(migration.read_text())
             c.execute('select next_date,eligible_from from public.habit_tracking where habit_id=%s', (habit,))
             start, eligible = c.fetchone(); assert start == eligible
             c.execute('select (clock_timestamp() at time zone \'UTC\')::date'); assert c.fetchone()[0] == start
