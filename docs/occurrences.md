@@ -2,9 +2,10 @@
 
 Backend milestone 5 adds durable scheduled occurrences, Today, binary completion,
 and integer target progress. Profiles, private habit configuration, friendships,
-and archive/restore remain available. Friends cannot view or modify occurrences.
-Sharing, excuses, streaks, notification delivery, mobile UI, and a history endpoint
-are deferred.
+and archive/restore remain available. [Selective habit sharing](sharing.md) lets
+chosen accepted friends read the owner's Today through separate shared views.
+All occurrence mutation endpoints remain owner-only. Excuses, streaks,
+notification delivery, mobile UI, and a history endpoint are deferred.
 
 ## HTTP contracts
 
@@ -98,7 +99,9 @@ database. Multi-day inactivity generates missed days on the next relevant call.
 No in-process timer is needed. Physical closure is lazy; the closing instant makes
 edits illegal immediately, even before a later read persists missed state.
 
-Today, occurrence mutations, and all habit reads/mutations reconcile first. Every
+Today, occurrence mutations, and all habit reads/mutations reconcile first.
+Authorized shared reads also reconcile stale owner occurrences before returning
+status; inaccessible shared reads never reconcile that owner's data. Every
 habit configuration/lifecycle change reconciles under the old values within its
 own transaction, before the new values are stored. Today’s schedule decision and
 applicable snapshot are therefore fixed before an edit, even without a previous
@@ -140,8 +143,10 @@ Backend RPCs lock the owning profile first and hold that lock through commit,
 before any habit or occurrence row locks. Profile PATCH already locks that same
 row; timezone triggers reconcile within it. This serializes reconciliation,
 configuration/lifecycle edits, and progress mutations for one owner consistently,
-avoiding lost increments and duplicate concurrent generation. Different owners
-can proceed independently. No habit configuration/lifecycle writes are allowed
+avoiding lost increments and duplicate concurrent generation. Sharing operations
+and friendship removal coordinate multiple participating profiles in UUID order
+before taking habit, relationship, or grant locks; see [sharing concurrency](sharing.md#database-and-concurrency).
+Different owners can otherwise proceed independently. No habit configuration/lifecycle writes are allowed
 directly to client or service-role table access; use the existing RPCs.
 
 All new tables have RLS with no client policies and explicit privilege revocations
@@ -180,7 +185,7 @@ before applying to a shared instance.
 Use the disposable PostgreSQL setup in [habits.md](habits.md), apply all migrations
 in order, and run `python -m pytest -q` from backend with TEST_DATABASE_URL set.
 CI's postgres-integration job explicitly runs test_occurrences_postgres.py along
-with the existing friendships/habits integration suites, so these tests are not
+with the friendships, habits, and sharing integration suites, so these tests are not
 merely skipped in the unit job. Tests cover local/UTC dates, both DST day lengths,
 exact deadlines, inactivity, snapshots, archive gaps, timezone transitions,
 concurrent generation/increments/retries/edits, migration cutover, and privileges.

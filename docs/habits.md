@@ -2,14 +2,17 @@
 
 Habit configuration is now integrated with [daily occurrence tracking](occurrences.md).
 That guide documents Today/completion/progress, snapshots, and when configuration,
-archive/restore, or timezone edits take effect. History/streaks/excuses, sharing,
+archive/restore, or timezone edits take effect. [Selective sharing](sharing.md)
+adds read-only views for explicitly chosen accepted friends. History/streaks/excuses,
 notification delivery, and mobile tracking UI remain deferred. Existing
 infrastructure, profiles, and friendships remain available.
 
 All endpoints require a valid Supabase Auth bearer access token **and an existing
-profile**. Identity comes from Auth, never a request field. Habits are private:
-accepted friends have no access. A foreign habit ID and a nonexistent habit ID
-produce the same `404 habit_not_found`, including archive/restore and PATCH.
+profile**. Identity comes from Auth, never a request field. Habits are private by
+default; friendship alone gives no access. These existing habit endpoints remain
+owner-only even when a separate sharing grant exists. A foreign habit ID and a
+nonexistent habit ID produce the same `404 habit_not_found`, including
+archive/restore and PATCH. Recipients use `/shared-habits` routes instead.
 
 ## Endpoints
 
@@ -80,6 +83,11 @@ empty object, and reject configuration or other fields. They are idempotent:
 repeated archive preserves the original `archived_at` and `updated_at`; repeated
 restore leaves `updated_at` unchanged. Restore clears `archived_at`. Neither
 operation changes configuration or IDs.
+
+Archived habits are hidden from sharing recipients, while their grants remain.
+Restoring makes those grants usable again if the same friendship still exists.
+Removing a friendship or explicitly revoking a grant prevents restoration from
+returning access. See [sharing lifecycle rules](sharing.md#lifecycle).
 
 ### Errors
 
@@ -182,7 +190,7 @@ shared database. PostgreSQL tests use a disposable PostgreSQL 16 instance and th
 existing `backend/tests/postgres_scaffold.sql`, deliberately granting Supabase-style
 default table/function privileges so migration revocations are tested. Habit RPCs
 are exercised as `service_role`, with direct client table/function access denied.
-CI explicitly runs both friendships and habits PostgreSQL files.
+CI explicitly runs the friendships, habits, occurrences, and sharing PostgreSQL files.
 
 To run locally in PowerShell with Docker and psql installed (local PostgreSQL 16
 only; use a fresh container, never a shared database):
@@ -203,7 +211,7 @@ $env:TEST_DATABASE_URL = "postgresql://postgres:postgres@localhost:55432/postgre
 Set-Location backend
 python -m pip install -r requirements-dev.txt
 python -m pytest -q
-python -m pytest -q tests/test_friendships_postgres.py tests/test_habits_postgres.py
+python -m pytest -q tests/test_friendships_postgres.py tests/test_habits_postgres.py tests/test_occurrences_postgres.py tests/test_sharing_postgres.py
 Set-Location ..
 Remove-Item Env:TEST_DATABASE_URL
 Remove-Item Env:PGPASSWORD

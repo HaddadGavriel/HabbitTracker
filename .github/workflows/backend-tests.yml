@@ -53,4 +53,4 @@ jobs:
         run: psql -h localhost -U postgres -v ON_ERROR_STOP=1 -f backend/tests/postgres_scaffold.sql
       - name: Apply migrations
         run: for migration in supabase/migrations/*.sql; do psql -h localhost -U postgres -v ON_ERROR_STOP=1 -f "$migration"; done
-      - run: python -m pytest -q backend/tests/test_friendships_postgres.py backend/tests/test_habits_postgres.py backend/tests/test_occurrences_postgres.py
+      - run: python -m pytest -q backend/tests/test_friendships_postgres.py backend/tests/test_habits_postgres.py backend/tests/test_occurrences_postgres.py backend/tests/test_sharing_postgres.py
