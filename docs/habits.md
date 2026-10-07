@@ -1,9 +1,10 @@
 # Private habit management
 
-This milestone stores habit configuration only. It does not generate occurrences,
-track Today/completion/progress/history/streaks/excuses, share habits, deliver
-notifications, or change the mobile UI. Existing infrastructure, profiles, and
-friendships remain available.
+Habit configuration is now integrated with [daily occurrence tracking](occurrences.md).
+That guide documents Today/completion/progress, snapshots, and when configuration,
+archive/restore, or timezone edits take effect. History/streaks/excuses, sharing,
+notification delivery, and mobile tracking UI remain deferred. Existing
+infrastructure, profiles, and friendships remain available.
 
 All endpoints require a valid Supabase Auth bearer access token **and an existing
 profile**. Identity comes from Auth, never a request field. Habits are private:
@@ -48,9 +49,10 @@ configuration edits and archival. There is no permanent deletion endpoint.
 
 Reminder times and weekdays are **local wall-clock settings in the owner's current
 profile IANA timezone**. They are not UTC timestamps and do not include offsets or
-timezones of their own. Changing the profile timezone changes their interpretation.
-This milestone stores settings only; daylight-saving scheduling and notification
-execution belong to the future occurrence/delivery milestones.
+timezones of their own. Changing the profile timezone changes subsequent occurrences
+according to the transition policy; existing occurrences keep their snapshots.
+Occurrence deadlines account for daylight-saving transitions. Notification
+execution belongs to a future delivery milestone.
 
 Daily schedules with nonempty weekdays and selected schedules with empty weekdays
 are contradictory and rejected. Duplicate weekdays/reminders are rejected rather
@@ -166,11 +168,12 @@ from service_role. The backend determines the owner from validated Supabase Auth
 never expose service-role credentials to clients. Modern `sb_secret_` keys remain
 in the `apikey` header and are never used as Bearer JWTs.
 
-Future occurrence implementation **must snapshot relevant configuration** (including
-name/type/target/unit and applicable schedule/reminder/timezone interpretation)
-when generating an occurrence. Later habit/profile edits must never rewrite
-existing occurrences or historical progress. Habit IDs remain stable references;
-no occurrences are generated in this milestone.
+Occurrences snapshot relevant configuration (including name/type/target/unit,
+schedule/reminder settings, and timezone). Configuration and timezone edits
+reconcile elapsed dates and materialize today's applicable occurrence first.
+Later edits never rewrite existing snapshots, deadlines, or historical progress.
+Habit IDs remain stable references. See the occurrence guide for the durable
+checkpoint and deterministic timezone transition policy.
 
 ## Tests
 

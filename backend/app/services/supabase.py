@@ -24,6 +24,11 @@ class HabitError(Exception):
         self.code = code
 
 
+class OccurrenceError(Exception):
+    def __init__(self, code: str):
+        self.code = code
+
+
 class SupabaseDatabase:
     def __init__(self, settings: Settings):
         self.base_url = f"{settings.supabase_url.rstrip('/')}/rest/v1"
@@ -242,3 +247,34 @@ class SupabaseDatabase:
     async def set_habit_archived(self, user_id: str, habit_id: str, archived: bool) -> dict | None:
         function = "archive_habit" if archived else "restore_habit"
         return await self._habit_rpc(function, {"p_owner": user_id, "p_habit": habit_id})
+
+    async def get_today(self, user_id: str) -> dict:
+        response = await self._rpc("get_today", {"p_owner": user_id})
+        self._occurrence_error(response)
+        response.raise_for_status()
+        return response.json()
+
+    @staticmethod
+    def _occurrence_error(response: httpx.Response) -> None:
+        if response.status_code >= 400:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            if isinstance(payload, dict) and payload.get("code") == "P0001" and payload.get("message") == "profile_not_found":
+                raise OccurrenceError("profile_not_found")
+
+    async def mutate_occurrence(self, user_id: str, occurrence_id: str, operation: str, value: bool | int, key: str | None = None) -> dict | None:
+        response = await self._rpc("mutate_occurrence", {
+            "p_owner": user_id, "p_occurrence": occurrence_id, "p_operation": operation, "p_value": value, "p_key": key,
+        })
+        self._occurrence_error(response)
+        response.raise_for_status()
+        rows = response.json()
+        row = rows[0] if rows else None
+        if isinstance(row, dict) and row.get("error") in {
+            "wrong_occurrence_type", "occurrence_closed", "negative_progress", "invalid_occurrence_value",
+            "invalid_idempotency_key", "idempotency_conflict",
+        }:
+            raise OccurrenceError(row["error"])
+        return row
