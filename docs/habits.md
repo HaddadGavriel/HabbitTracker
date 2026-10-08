@@ -3,8 +3,9 @@
 Habit configuration is now integrated with [daily occurrence tracking](occurrences.md).
 That guide documents Today/completion/progress, snapshots, and when configuration,
 archive/restore, or timezone edits take effect. [Selective sharing](sharing.md)
-adds read-only views for explicitly chosen accepted friends. History/streaks/excuses,
-notification delivery, and mobile tracking UI remain deferred. Existing
+adds read-only views for explicitly chosen accepted friends. [Occurrence excuses](excuses.md)
+add owner explanations and decisions by currently authorized shared friends.
+General history, streaks, notification delivery, and mobile tracking UI remain deferred. Existing
 infrastructure, profiles, and friendships remain available.
 
 All endpoints require a valid Supabase Auth bearer access token **and an existing

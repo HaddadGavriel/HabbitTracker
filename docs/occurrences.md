@@ -4,8 +4,9 @@ Backend milestone 5 adds durable scheduled occurrences, Today, binary completion
 and integer target progress. Profiles, private habit configuration, friendships,
 and archive/restore remain available. [Selective habit sharing](sharing.md) lets
 chosen accepted friends read the owner's Today through separate shared views.
-All occurrence mutation endpoints remain owner-only. Excuses, streaks,
-notification delivery, mobile UI, and a history endpoint are deferred.
+Normal completion/progress endpoints remain owner-only. [Occurrence excuses](excuses.md)
+add owner submissions and decisions by currently authorized shared friends.
+Streaks, notification delivery, mobile UI, and a general history endpoint are deferred.
 
 ## HTTP contracts
 
@@ -23,7 +24,7 @@ Extra body fields are rejected. Database time is authoritative.
 
 Today returns `local_date` (YYYY-MM-DD in the current profile timezone), `timezone`
 (IANA name), `server_time` (UTC RFC 3339), and `occurrences` (array ordered by
-habit UUID then occurrence UUID). It includes completed occurrences and today's
+habit UUID then occurrence UUID). It includes completed, pending, and excused occurrences and today's
 already-due occurrences from archived habits. It excludes unscheduled habits.
 A retained occurrence whose deadline has passed after a timezone change can appear
 as missed. An empty array is valid. There is no arbitrary date filter.
@@ -40,15 +41,24 @@ Each occurrence contains:
 | `snapshot` | Habit configuration object: name, description, immutable type, target, unit, schedule, ISO weekdays, reminder times |
 | `progress` | Nonnegative integer; binary always zero |
 | `completed` | Binary explicit flag; target derived from progress >= snapshotted target |
-| `state` | `in_progress`, `completed`, or `missed` |
+| `state` | `in_progress`, `completed`, `missed`, `justification_pending`, or `excused` |
 | `created_at`, `updated_at` | Server timestamps |
 
 Snapshots, IDs, dates, and deadlines never change. Reminder times are stored only;
 no notification is delivered. Configuration/profile edits cannot rewrite progress.
 An occurrence begins in_progress, binary incomplete or target zero. At or after
-closes_at, incomplete becomes missed and completed stays completed. There is no
-grace period. Before closing, undo or reducing target progress below its snapshot
-target reopens the occurrence. Progress may exceed the target; it is not capped.
+closes_at, ordinary in_progress occurrences become missed and completed stays
+completed. There is no grace period. Before closing, undo or reducing target
+progress below its snapshot target reopens an occurrence that has no excuse.
+Progress may exceed the target; it is not capped.
+
+Submitting an excuse preserves progress, completion, and every snapshot but locks
+normal mutations. An unshared submission becomes excused; a shared submission
+becomes justification_pending until an authorized friend approves (excused) or
+rejects (missed). Reconciliation leaves pending and excused states unchanged.
+Rejection is final even before midnight. Excused does not mean completed: an
+excused occurrence retains `completed: false` and its partial progress. Future
+streak logic will count both completed and excused; this milestone calculates no streaks.
 
 Progress and delta accept JSON integers only, including zero. Booleans, decimal
 numbers (including `1.0`), fractions, strings, null, and missing fields are rejected.
@@ -63,7 +73,8 @@ Delta keys must contain 1–128 ASCII letters, digits, `.`, `_`, `:`, or `-`.
 Keys are scoped to one occurrence. Use a new key for each intended adjustment.
 The first successful adjustment and its response are stored atomically. Repeating
 the same key and delta returns the original response, even if later mutations or
-closure have changed the occurrence; it performs no new edit. A different delta
+closure or an excuse have changed the occurrence; it performs no new edit and
+cannot reopen or alter a pending, excused, or rejected occurrence. A different delta
 with that key returns `409 idempotency_conflict`. Rejected adjustments do not
 consume a key. The replay response can therefore be older than Today.
 
@@ -79,6 +90,7 @@ format. FastAPI request validation uses its usual `422 detail` array.
 | 404 | `occurrence_not_found` | Missing occurrence or occurrence owned by anyone else; identical response |
 | 409 | `wrong_occurrence_type` | Binary operation on target or progress operation on binary |
 | 409 | `occurrence_closed` | Deadline reached; no owner edits |
+| 409 | `occurrence_locked` | An excuse has locked normal completion/progress, including after rejection |
 | 409 | `idempotency_conflict` | Key already succeeded with another delta |
 | 422 | `negative_progress` | Adjustment would reduce progress below zero |
 | 422 | `invalid_occurrence_value` | Invalid database operation/value (HTTP validation normally catches this) |
@@ -94,7 +106,8 @@ tracking begins or for archived dates.
 Each habit has a private persisted cursor: next unprocessed date, timezone, and
 eligibility floor. Reconciliation generates all due scheduled dates through today,
 advances the cursor even over unscheduled/archived days, and closes expired
-incomplete occurrences. Inserts are idempotent and uniqueness is enforced by the
+in_progress occurrences. It never closes justification_pending or rewrites
+excused occurrences. Inserts are idempotent and uniqueness is enforced by the
 database. Multi-day inactivity generates missed days on the next relevant call.
 No in-process timer is needed. Physical closure is lazy; the closing instant makes
 edits illegal immediately, even before a later read persists missed state.
@@ -115,7 +128,8 @@ due dates have snapshots; skipped dates are durably consumed. Configuration,
 archive/restore, cursor updates, and generation all commit or roll back together.
 
 Archiving reconciles first, keeps today's due occurrence/deadline/progress, and
-stops subsequent occurrences. Restoring reconciles the archived interval without
+stops subsequent occurrences. Pending excuses survive archival; owners can inspect
+them while recipients lose access until restoration and valid sharing. Restoring reconciles the archived interval without
 generating it, then may materialize scheduled today if absent and above the
 eligibility floor. Same-day archive/restore does not duplicate or reset progress.
 
@@ -145,14 +159,16 @@ row; timezone triggers reconcile within it. This serializes reconciliation,
 configuration/lifecycle edits, and progress mutations for one owner consistently,
 avoiding lost increments and duplicate concurrent generation. Sharing operations
 and friendship removal coordinate multiple participating profiles in UUID order
-before taking habit, relationship, or grant locks; see [sharing concurrency](sharing.md#database-and-concurrency).
+before taking habit, relationship, or grant locks. Excuse reads and decisions
+use the same ordering; see [sharing concurrency](sharing.md#database-and-concurrency)
+and [excuse transitions](excuses.md#persistence-and-concurrency).
 Different owners can otherwise proceed independently. No habit configuration/lifecycle writes are allowed
 directly to client or service-role table access; use the existing RPCs.
 
 All new tables have RLS with no client policies and explicit privilege revocations
 for PUBLIC, anon, authenticated, and service_role, including default Supabase
-grants. Only get_today and mutate_occurrence entry points grant service_role
-EXECUTE; helpers are private. SECURITY DEFINER entry points and timezone triggers
+grants. Only intended backend RPC entry points grant service_role EXECUTE;
+helpers are private. SECURITY DEFINER entry points and timezone triggers
 fix search_path to empty and qualify objects. Ownership is checked in PostgreSQL
 as well as supplied only from authenticated backend identity. Constraints and
 triggers enforce ownership, uniqueness, snapshots, progress, and legal closure.
@@ -173,7 +189,9 @@ at the write-time deadline, including unchanged values, while allowing internal
 closure to persist missed state. Previously applied migrations are unchanged.
 Deploy compatible backend code after the migrations; legacy habit/profile routes
 also use their triggers.
-No shared database migration, deployment, or merge is part of this PR.
+The later [sharing](sharing.md#migration-and-tests) and
+[excuse](excuses.md#migrations-and-testing) migrations extend these contracts.
+No shared database migration, deployment, or merge is part of this implementation.
 
 Existing habits begin tracking at their owner-local date when the migration runs,
 not at their earlier created_at. Active habits can acquire that cutover day's
@@ -185,7 +203,7 @@ before applying to a shared instance.
 Use the disposable PostgreSQL setup in [habits.md](habits.md), apply all migrations
 in order, and run `python -m pytest -q` from backend with TEST_DATABASE_URL set.
 CI's postgres-integration job explicitly runs test_occurrences_postgres.py along
-with the friendships, habits, and sharing integration suites, so these tests are not
+with the friendships, habits, sharing, and excuses integration suites, so these tests are not
 merely skipped in the unit job. Tests cover local/UTC dates, both DST day lengths,
 exact deadlines, inactivity, snapshots, archive gaps, timezone transitions,
 concurrent generation/increments/retries/edits, migration cutover, and privileges.

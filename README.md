@@ -1,6 +1,6 @@
 # Habit Tracker — profiles, friendships, and habit tracking
 
-This repository contains authenticated profiles, exact username lookup, friendships, private habit tracking, and selective read-only habit sharing. It also retains the Android infrastructure proof. Backend contracts and PowerShell walkthroughs are in [`docs/friendships.md`](docs/friendships.md), [`docs/habits.md`](docs/habits.md), [`docs/occurrences.md`](docs/occurrences.md), and [`docs/sharing.md`](docs/sharing.md).
+This repository contains authenticated profiles, exact username lookup, friendships, private habit tracking, selective habit sharing, and occurrence excuses with friend decisions. It also retains the Android infrastructure proof. Backend contracts and PowerShell walkthroughs are in [`docs/friendships.md`](docs/friendships.md), [`docs/habits.md`](docs/habits.md), [`docs/occurrences.md`](docs/occurrences.md), [`docs/sharing.md`](docs/sharing.md), and [`docs/excuses.md`](docs/excuses.md).
 
 ## Architecture
 
@@ -222,8 +222,8 @@ Open EAS's build link on the phone, download/install the APK, and approve Androi
 
 ## Deliberate limitations
 
-This proof stores Expo ticket IDs but does not poll Expo receipts or implement scheduled token cleanup. Expo ticket acceptance and actual Android display are distinct; the real-phone procedure is the delivery test. Profiles, exact username search, backend friendships, private habit tracking, and selective read-only sharing are implemented. Streaks, excuses, history endpoints, social notifications, and polished production UX remain deferred.
+This proof stores Expo ticket IDs but does not poll Expo receipts or implement scheduled token cleanup. Expo ticket acceptance and actual Android display are distinct; the real-phone procedure is the delivery test. Profiles, exact username search, backend friendships, private habit tracking, selective sharing, and occurrence excuses with friend approval/rejection are implemented. Streaks, general history endpoints, social notifications, and mobile tracking UI remain deferred.
 
 ## Private habit management
 
-The backend supports private habit configuration, schedules, reminder settings, and archive/restore. See [the habit API guide](docs/habits.md) for configuration contracts, and [daily occurrence tracking](docs/occurrences.md) for Today, complete/undo, target progress, reconciliation, lifecycle/timezone policies, migration steps, and PowerShell examples. Owners can [share individual habits with accepted friends](docs/sharing.md); recipients see the owner's Today and cannot mutate shared habits. Notification delivery and mobile tracking UI remain deferred.
+The backend supports private habit configuration, schedules, reminder settings, and archive/restore. See [the habit API guide](docs/habits.md) for configuration contracts, and [daily occurrence tracking](docs/occurrences.md) for Today, complete/undo, target progress, reconciliation, lifecycle/timezone policies, migration steps, and PowerShell examples. Owners can [share individual habits with accepted friends](docs/sharing.md); recipients see the owner's Today. Owners may [submit occurrence excuses](docs/excuses.md): unshared submissions automatically approve, while currently authorized friends decide shared submissions. Recipients cannot edit habit configuration or normal completion/progress. Notification delivery and mobile tracking UI remain deferred.
