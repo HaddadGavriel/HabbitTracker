@@ -5,11 +5,12 @@ private by default: an accepted friendship alone gives no access. All sharing
 routes require a Supabase bearer token validated by FastAPI and an existing
 profile. The backend derives the acting user from Auth; clients cannot choose it.
 
-Recipients have read-only access through `/shared-habits`. Existing `/habits`,
-`/today`, and `/occurrences` endpoints retain their owner-only behavior. A grant
-does not allow a recipient to edit, archive, restore, complete, undo, or change
-progress. There are no streak fields, excuses, history endpoints, notifications,
-or mobile changes in this milestone.
+Recipients have read access through `/shared-habits`. Existing `/habits`,
+`/today`, and normal completion/progress endpoints retain their owner-only behavior.
+A grant does not allow a recipient to edit, archive, restore, complete, undo, or
+change progress. A currently authorized friend can also read and decide an
+[occurrence excuse](excuses.md) through its dedicated endpoints. Streak fields,
+general history endpoints, notifications, and mobile changes remain deferred.
 
 ## Endpoints and errors
 
@@ -82,7 +83,7 @@ An occurrence contains exactly:
 | `snapshot` | Configuration at generation, with the same fields as `configuration` |
 | `progress` | Nonnegative integer; binary occurrences always use zero |
 | `completed` | Binary explicit completion, or target progress at least the snapshotted target |
-| `state` | `in_progress`, `completed`, or `missed` |
+| `state` | `in_progress`, `completed`, `missed`, `justification_pending`, or `excused` |
 
 `configuration` and `occurrence.snapshot` are intentionally distinct. For example,
 after the owner changes a target from 10 pages to 20, today's occurrence can still
@@ -90,10 +91,16 @@ have `snapshot.target: 10`, `progress: 10`, and `completed: true`, while
 `configuration.target` is 20. A reader must evaluate today's progress against the
 snapshot, never the current target. Name, schedule, unit, and reminder settings
 can similarly differ after edits. Reminder settings do not trigger delivery.
+Pending and excused occurrences retain their original progress and
+`completed: false`; excuses never count as ordinary completion in this response.
+Shared lists and Today do not include explanations or decision metadata. Read
+those through the dedicated excuse endpoint when currently authorized.
 
 Shared views follow the existing [owner-timezone and reconciliation policies](occurrences.md).
 An authorized read reconciles stale occurrences before returning status, including
-closing overdue incomplete occurrences and generating due dates after inactivity.
+closing overdue in_progress occurrences and generating due dates after inactivity.
+Pending and excused occurrences survive midnight unchanged. A rejection produces
+final missed state, including when the friend decides before midnight.
 Unauthorized reads do not reconcile another owner's data. Each shared list item
 uses its own owner's Today; the list can contain different local dates/timezones.
 
@@ -108,10 +115,16 @@ timezones, deadlines, snapshots, and progress remain unchanged by travel or edit
 Explicit revocation removes access for subsequent requests. A request that
 serialized before revocation can finish with the previously authorized view;
 revocation does not retract an already returned response.
+It also removes excuse read/decision access and pending-list membership on
+subsequent requests. Newly granted accepted friends may decide an existing pending
+excuse; recipients are checked at request time, not frozen when it was submitted.
 
 Removing a friendship atomically deletes every grant tied to that relationship
 in both directions. Re-establishing friendship creates a new relationship and
 does not restore old grants. Owners must explicitly share again.
+Excuses are retained. Losing every eligible friend does not approve, reject, or
+erase a pending excuse; it remains pending until the owner restores valid sharing
+and an authorized friend decides.
 
 Archived habits disappear from recipient lists and return `404 habit_not_found`
 through shared detail. Existing grants remain while archived, and owners can
@@ -120,10 +133,14 @@ only if the original friendship still exists. Removing friendship while archived
 permanently deletes those grants too. The owner's Today may still retain an
 already-due occurrence from an archived habit; recipients cannot view it through
 the archived habit's shared view.
+Pending excuses likewise survive archival, but recipients cannot read or decide
+them while the habit is archived. Owners may inspect them. After restoration,
+currently valid recipients can decide even if the occurrence's deadline passed.
 
-Deleting a profile or Auth account removes related grants through foreign-key
-cascades, whether the deleted user owned or received the share. This milestone
-does not add profile, account, or permanent habit deletion endpoints.
+When a profile or Auth account deletion can commit, related grants are removed
+through foreign-key cascades, whether the deleted user owned or received the
+share. Retained excuse decisions can [restrict deciding-profile deletion](excuses.md#persistence-and-concurrency).
+This milestone does not add profile, account, or permanent habit deletion endpoints.
 
 ## Database and concurrency
 
@@ -135,7 +152,7 @@ resurrect them.
 
 Sharing and friendship removal acquire participating profile locks in UUID order
 before row locks, coordinating with the existing owner-profile reconciliation,
-configuration, archive, timezone, and progress locks. Multi-owner shared lists
+configuration, archive, timezone, progress, and excuse-decision locks. Multi-owner shared lists
 acquire their candidate profile locks in the same order. Access is rechecked
 under these locks before reconciliation and response construction. Granting
 checks habit ownership and accepted friendship atomically. Grant/removal,
@@ -163,6 +180,8 @@ Apply `supabase/migrations/202610070004_selective_habit_sharing.sql` after the
 occurrence and deadline migrations from merged PR #9. Preserve all existing
 migration files and apply every unapplied
 file in filename order only through a separately authorized infrastructure release.
+The later [excuse migration](excuses.md#migrations-and-testing) extends these
+permissions with dedicated friend decisions.
 This implementation does not merge, deploy, or apply migrations to a shared database.
 
 The suite includes API dependency tests, mocked HTTP adapter tests, and disposable
@@ -178,7 +197,7 @@ the scaffold and all migrations, then run from `backend`:
 ```powershell
 # With TEST_DATABASE_URL pointing only to the disposable local database:
 python -m pytest -q
-python -m pytest -q tests/test_friendships_postgres.py tests/test_habits_postgres.py tests/test_occurrences_postgres.py tests/test_sharing_postgres.py
+python -m pytest -q tests/test_friendships_postgres.py tests/test_habits_postgres.py tests/test_occurrences_postgres.py tests/test_sharing_postgres.py tests/test_excuses_postgres.py
 ```
 
 Without `TEST_DATABASE_URL`, PostgreSQL tests skip; this is not database

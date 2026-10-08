@@ -32,7 +32,7 @@ class OccurrenceResult(BaseModel):
     snapshot: HabitCreate
     progress: int
     completed: bool
-    state: Literal["in_progress", "completed", "missed"]
+    state: Literal["in_progress", "completed", "missed", "justification_pending", "excused"]
     created_at: datetime
     updated_at: datetime
 

@@ -34,6 +34,11 @@ class SharingError(Exception):
         self.code = code
 
 
+class ExcuseError(Exception):
+    def __init__(self, code: str):
+        self.code = code
+
+
 class SupabaseDatabase:
     def __init__(self, settings: Settings):
         self.base_url = f"{settings.supabase_url.rstrip('/')}/rest/v1"
@@ -278,7 +283,7 @@ class SupabaseDatabase:
         rows = response.json()
         row = rows[0] if rows else None
         if isinstance(row, dict) and row.get("error") in {
-            "wrong_occurrence_type", "occurrence_closed", "negative_progress", "invalid_occurrence_value",
+            "wrong_occurrence_type", "occurrence_closed", "occurrence_locked", "negative_progress", "invalid_occurrence_value",
             "invalid_idempotency_key", "idempotency_conflict",
         }:
             raise OccurrenceError(row["error"])
@@ -318,3 +323,40 @@ class SupabaseDatabase:
 
     async def get_shared_habit(self, user_id: str, habit_id: str) -> dict | None:
         return await self._sharing_rpc("get_shared_habit", {"p_recipient": user_id, "p_habit": habit_id})
+
+    async def _excuse_rpc(self, function: str, body: dict, *, many: bool = False):
+        codes = {
+            "profile_not_found", "invalid_excuse_explanation", "occurrence_closed", "occurrence_not_in_progress",
+            "excuse_exists", "excuse_already_decided", "invalid_excuse_decision",
+        }
+        response = await self._rpc(function, body)
+        if response.status_code == 400:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            if isinstance(payload, dict) and payload.get("code") == "P0001" and payload.get("message") in codes:
+                raise ExcuseError(payload["message"])
+        response.raise_for_status()
+        rows = response.json()
+        # Committed envelopes preserve deadline reconciliation on a rejected
+        # submission, just as normal occurrence mutations do.
+        if rows and isinstance(rows[0], dict) and rows[0].get("error") in codes:
+            raise ExcuseError(rows[0]["error"])
+        return rows if many else (rows[0] if rows else None)
+
+    async def submit_occurrence_excuse(self, user_id: str, occurrence_id: str, explanation: str) -> dict | None:
+        return await self._excuse_rpc("submit_occurrence_excuse", {
+            "p_owner": user_id, "p_occurrence": occurrence_id, "p_explanation": explanation,
+        })
+
+    async def get_occurrence_excuse(self, user_id: str, occurrence_id: str) -> dict | None:
+        return await self._excuse_rpc("get_occurrence_excuse", {"p_actor": user_id, "p_occurrence": occurrence_id})
+
+    async def list_pending_excuses(self, user_id: str) -> list[dict]:
+        return await self._excuse_rpc("list_pending_excuses", {"p_actor": user_id}, many=True)
+
+    async def decide_occurrence_excuse(self, user_id: str, excuse_id: str, decision: str) -> dict | None:
+        return await self._excuse_rpc("decide_occurrence_excuse", {
+            "p_actor": user_id, "p_excuse": excuse_id, "p_decision": decision,
+        })

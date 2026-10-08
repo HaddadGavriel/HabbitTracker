@@ -15,6 +15,7 @@ ERRORS = {
     "profile_not_found": (404, "Create a profile to complete onboarding"),
     "wrong_occurrence_type": (409, "Operation does not match occurrence type"),
     "occurrence_closed": (409, "Occurrence is closed"),
+    "occurrence_locked": (409, "Occurrence is locked by an excuse submission"),
     "negative_progress": (422, "Progress cannot be negative"),
     "invalid_occurrence_value": (422, "Invalid occurrence value"),
     "invalid_idempotency_key": (422, "Invalid idempotency key"),
