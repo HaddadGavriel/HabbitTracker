@@ -11,7 +11,9 @@ A grant does not allow a recipient to edit, archive, restore, complete, undo, or
 change progress. A currently authorized friend can also read and decide an
 [occurrence excuse](excuses.md) through its dedicated endpoints. Shared views
 include [current streaks](history.md), while full occurrence history remains
-owner-only. Notifications and mobile changes remain deferred.
+owner-only. A currently authorized friend can [request a push reminder](reminders.md)
+for an open incomplete occurrence due Today. Scheduled notifications and mobile
+changes remain deferred.
 
 ## Endpoints and errors
 
@@ -22,6 +24,7 @@ owner-only. Notifications and mobile changes remain deferred.
 | GET | `/habits/{habit_id}/shares` | `200` array of granted recipients' public identities; owner only |
 | GET | `/shared-habits` | `200` array of currently accessible active habits for the authenticated recipient |
 | GET | `/shared-habits/{habit_id}` | `200` one currently accessible active habit |
+| POST | `/shared-habits/{habit_id}/reminders` | `200` stored dispatch result or `202` reservation; see [reminder contract](reminders.md) |
 
 Owner grant lists are ordered by current recipient username, then user UUID.
 Shared habit lists are ordered by owner UUID, then habit creation time and UUID.
@@ -125,8 +128,10 @@ timezones, deadlines, snapshots, and progress remain unchanged by travel or edit
 Explicit revocation removes access for subsequent requests. A request that
 serialized before revocation can finish with the previously authorized view;
 revocation does not retract an already returned response.
-It also removes excuse read/decision access and pending-list membership on
-subsequent requests. Newly granted accepted friends may decide an existing pending
+It also removes excuse read/decision access, pending-list membership, and
+reminder reservation/replay access on subsequent requests. A reminder already
+authorized by a committed reservation can still be sent after revocation; see
+the [reminder concurrency boundary](reminders.md#devices-security-and-concurrency). Newly granted accepted friends may decide an existing pending
 excuse; recipients are checked at request time, not frozen when it was submitted.
 
 Removing a friendship atomically deletes every grant tied to that relationship
