@@ -68,6 +68,7 @@ class Database:
         return {"id": ROW["habit_id"], "owner": {"user_id": OWNER, "username": "owner", "display_name": "Owner"},
                 "configuration": ROW["snapshot"], "local_date": "2026-03-01", "timezone": "UTC",
                 "server_time": "2026-03-01T12:00:00Z", "due_today": True,
+                "current_streak": 0, "provisional": True, "calculated_at": "2026-03-01T12:00:00Z",
                 "occurrence": self.rows[0]["occurrence"] | {"explanation": "private"}, "explanation": "private"}
 
     async def get_shared_habit(self, actor, habit):

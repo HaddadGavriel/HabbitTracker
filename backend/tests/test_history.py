@@ -175,7 +175,8 @@ def test_history_returns_stored_snapshot_and_compact_excuse_metadata(api, status
     db.page["occurrences"] = [OCCURRENCE_ROW | {"snapshot": snapshot, "progress": 4, "completed": False, "state": state,
         "timezone": "Pacific/Kiritimati", "local_date": "2026-03-02", "closes_at": "2026-03-02T10:00:00Z",
         "excuse": excuse | {"occurrence": deepcopy(ROW), "occurrence_id": OCCURRENCE, "owner_id": OWNER}}]
-    assert c.patch(f"/habits/{HABIT}", json={"name": "New name", "type": "target", "target": 20, "unit": "chapters"}).status_code == 200
+    db.habits[HABIT].update(snapshot)
+    assert c.patch(f"/habits/{HABIT}", json={"name": "New name", "target": 20, "unit": "chapters"}).status_code == 200
     response = c.get(ENDPOINTS[0], params={"timezone": "America/Los_Angeles"})
     assert response.status_code == 200
     row = response.json()["occurrences"][0]
