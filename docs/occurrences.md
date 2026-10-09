@@ -6,7 +6,9 @@ and archive/restore remain available. [Selective habit sharing](sharing.md) lets
 chosen accepted friends read the owner's Today through separate shared views.
 Normal completion/progress endpoints remain owner-only. [Occurrence excuses](excuses.md)
 add owner submissions and decisions by currently authorized shared friends.
-Streaks, notification delivery, mobile UI, and a general history endpoint are deferred.
+[Occurrence history and current streaks](history.md) add owner-only historical
+reads and streaks, with current streaks also available in authorized shared views.
+Notification delivery and mobile UI remain deferred.
 
 ## HTTP contracts
 
@@ -57,8 +59,9 @@ normal mutations. An unshared submission becomes excused; a shared submission
 becomes justification_pending until an authorized friend approves (excused) or
 rejects (missed). Reconciliation leaves pending and excused states unchanged.
 Rejection is final even before midnight. Excused does not mean completed: an
-excused occurrence retains `completed: false` and its partial progress. Future
-streak logic will count both completed and excused; this milestone calculates no streaks.
+excused occurrence retains `completed: false` and its partial progress.
+[Current streaks](history.md#exact-streak-semantics) count both completed and
+excused and remain provisional for unresolved pending decisions in their segment.
 
 Progress and delta accept JSON integers only, including zero. Booleans, decimal
 numbers (including `1.0`), fractions, strings, null, and missing fields are rejected.
@@ -113,6 +116,7 @@ No in-process timer is needed. Physical closure is lazy; the closing instant mak
 edits illegal immediately, even before a later read persists missed state.
 
 Today, occurrence mutations, and all habit reads/mutations reconcile first.
+Owner history and streak reads reconcile and build their responses in one transaction.
 Authorized shared reads also reconcile stale owner occurrences before returning
 status; inaccessible shared reads never reconcile that owner's data. Every
 habit configuration/lifecycle change reconciles under the old values within its
@@ -189,8 +193,9 @@ at the write-time deadline, including unchanged values, while allowing internal
 closure to persist missed state. Previously applied migrations are unchanged.
 Deploy compatible backend code after the migrations; legacy habit/profile routes
 also use their triggers.
-The later [sharing](sharing.md#migration-and-tests) and
-[excuse](excuses.md#migrations-and-testing) migrations extend these contracts.
+The later [sharing](sharing.md#migration-and-tests),
+[excuse](excuses.md#migrations-and-testing), and
+[history/streak](history.md#migrations-and-tests) migrations extend these contracts.
 No shared database migration, deployment, or merge is part of this implementation.
 
 Existing habits begin tracking at their owner-local date when the migration runs,
@@ -203,7 +208,7 @@ before applying to a shared instance.
 Use the disposable PostgreSQL setup in [habits.md](habits.md), apply all migrations
 in order, and run `python -m pytest -q` from backend with TEST_DATABASE_URL set.
 CI's postgres-integration job explicitly runs test_occurrences_postgres.py along
-with the friendships, habits, sharing, and excuses integration suites, so these tests are not
+with the friendships, habits, sharing, excuses, and history integration suites, so these tests are not
 merely skipped in the unit job. Tests cover local/UTC dates, both DST day lengths,
 exact deadlines, inactivity, snapshots, archive gaps, timezone transitions,
 concurrent generation/increments/retries/edits, migration cutover, and privileges.

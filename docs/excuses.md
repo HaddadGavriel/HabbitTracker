@@ -4,8 +4,9 @@ An owner may explain an incomplete occurrence before its snapshotted deadline.
 If the habit has no valid sharing recipients, the submission automatically
 approves. Otherwise it waits for any currently authorized shared friend to
 approve or reject. Submission permanently locks normal completion/progress for
-that occurrence. This backend milestone adds no streak calculation, general
-history endpoint, notifications, or mobile UI.
+that occurrence. [Owner occurrence history and current streaks](history.md)
+include these decisions and preserve unresolved decisions as provisional streaks.
+Notifications and mobile UI remain deferred.
 
 ## HTTP contracts
 
@@ -23,8 +24,8 @@ never the acting user. Unknown body fields are rejected.
 The pending list includes older occurrence dates and orders globally by excuse
 `created_at` ascending, then excuse UUID ascending. It excludes the caller's own
 submissions, decided excuses, archived habits, and inaccessible habits. An empty
-array is valid. Owners inspect individual submissions using the occurrence UUID;
-there is no general history/list endpoint for owner submissions.
+array is valid. Owners inspect individual submissions using the occurrence UUID
+or the compact excuse object in [owner occurrence history](history.md).
 
 Explanation must be a JSON string. Leading and trailing Unicode whitespace is
 removed using Python `str.strip()` semantics; the stored result must have 1–1,000
@@ -50,8 +51,9 @@ Each success returns this shape; the nested occurrence uses the full
 | `occurrence` | Current occurrence, including preserved progress/snapshots and its current state |
 
 An automatic approval records a real server decision timestamp and never invents
-a deciding friend. Explanations and decision metadata appear only in these
-dedicated excuse responses, not unrelated profile, habit, Today, or shared lists.
+a deciding friend. Explanations and decision metadata appear in these dedicated
+excuse responses and owner-only occurrence history, not unrelated profile, habit,
+Today, or shared lists.
 
 ## Errors
 
@@ -107,8 +109,9 @@ changed by another friend or by the owner.
 Submitting and deciding preserve the occurrence's progress, `completed` value,
 dates, timezone, deadline, and all configuration snapshots. Excused is a separate
 state, never a fabricated completion: `completed` remains false and partial
-progress remains visible. Future streak logic will count both completed and
-excused, but this milestone does not calculate streaks.
+progress remains visible. [Current streaks](history.md#exact-streak-semantics)
+count completed and excused occurrences, ignore pending ones while flagging the
+segment as provisional, and recompute from stored states after each decision.
 
 Normal completion, undo, absolute progress, and new delta adjustments cannot
 alter pending, excused, or rejected occurrences. This includes same-value writes
@@ -189,9 +192,11 @@ read explanations, mutate decisions, or invoke the backend RPCs.
 
 ## Migrations and testing
 
-Apply all unapplied migrations in filename order, ending with
+Apply all unapplied migrations in filename order. Excuses use
 `202610080001_occurrence_excuses.sql`, after merged PR #10's
-`202610070004_selective_habit_sharing.sql`. Preserve previously applied files.
+`202610070004_selective_habit_sharing.sql`; the subsequent
+[history/streak migration](history.md#migrations-and-tests) adds owner reads and
+shared streak fields. Preserve previously applied files.
 Shared infrastructure migration/deployment requires a separate release; this
 implementation does not merge, deploy, or apply migrations to a shared project.
 
@@ -201,7 +206,7 @@ the scaffold and all migrations, then run from `backend`:
 ```powershell
 # TEST_DATABASE_URL must refer only to the disposable local PostgreSQL database.
 python -m pytest -q
-python -m pytest -q tests/test_friendships_postgres.py tests/test_habits_postgres.py tests/test_occurrences_postgres.py tests/test_sharing_postgres.py tests/test_excuses_postgres.py
+python -m pytest -q tests/test_friendships_postgres.py tests/test_habits_postgres.py tests/test_occurrences_postgres.py tests/test_sharing_postgres.py tests/test_excuses_postgres.py tests/test_history_postgres.py
 ```
 
 CI runs the new service-role PostgreSQL suite alongside every existing integration
