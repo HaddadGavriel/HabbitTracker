@@ -8,7 +8,7 @@ from uuid import UUID
 
 
 class DeviceRegistration(BaseModel):
-    expo_push_token: str = Field(pattern=r"^ExponentPushToken\[[^]]+\]$|^ExpoPushToken\[[^]]+\]$")
+    expo_push_token: str = Field(max_length=256, pattern=r"^(ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]+\]$")
     platform: Literal["android", "ios"]
 
 

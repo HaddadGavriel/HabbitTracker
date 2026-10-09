@@ -44,6 +44,12 @@ class HistoryError(Exception):
         self.code = code
 
 
+class ReminderError(Exception):
+    def __init__(self, code: str, retry_at: str | None = None):
+        self.code = code
+        self.retry_at = retry_at
+
+
 class SupabaseDatabase:
     def __init__(self, settings: Settings):
         self.base_url = f"{settings.supabase_url.rstrip('/')}/rest/v1"
@@ -55,16 +61,37 @@ class SupabaseDatabase:
         }
 
     async def register_device(self, user_id: str, token: str, platform: str) -> datetime:
-        now = datetime.now(timezone.utc)
-        headers = {**self.headers, "Prefer": "resolution=merge-duplicates,return=representation"}
-        async with httpx.AsyncClient(timeout=15) as client:
-            response = await client.post(
-                f"{self.base_url}/device_push_tokens?on_conflict=user_id,expo_push_token",
-                headers=headers,
-                json={"user_id": user_id, "expo_push_token": token, "platform": platform, "updated_at": now.isoformat()},
-            )
+        response = await self._rpc("register_device", {"p_user": user_id, "p_token": token, "p_platform": platform})
         response.raise_for_status()
-        return datetime.fromisoformat(response.json()[0]["updated_at"].replace("Z", "+00:00"))
+        return datetime.fromisoformat(response.json().replace("Z", "+00:00"))
+
+    async def _reminder_rpc(self, function: str, body: dict) -> dict | None:
+        codes = ("profile_not_found", "invalid_idempotency_key", "reminder_not_eligible",
+                 "reminder_cooldown", "invalid_reminder_results")
+        response = await self._rpc(function, body)
+        if response.status_code == 400:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            if isinstance(payload, dict) and payload.get("code") == "P0001" and payload.get("message") in codes:
+                raise ReminderError(payload["message"])
+        response.raise_for_status()
+        rows = response.json()
+        row = rows[0] if rows else None
+        if isinstance(row, dict) and row.get("error") in codes:
+            raise ReminderError(row["error"], row.get("retry_at"))
+        return row
+
+    async def reserve_habit_reminder(self, user_id: str, habit_id: str, key: str) -> dict | None:
+        return await self._reminder_rpc("reserve_habit_reminder", {
+            "p_sender": user_id, "p_habit": habit_id, "p_key": key,
+        })
+
+    async def finish_habit_reminder(self, user_id: str, reminder_id: str, results: list[dict]) -> dict | None:
+        return await self._reminder_rpc("finish_habit_reminder", {
+            "p_sender": user_id, "p_reminder": reminder_id, "p_results": results,
+        })
 
     async def create_test(self, request_id: str, user_id: str, client_started_at: datetime, received_at: datetime) -> None:
         async with httpx.AsyncClient(timeout=15) as client:
