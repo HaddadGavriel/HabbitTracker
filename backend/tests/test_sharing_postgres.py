@@ -13,7 +13,7 @@ from test_occurrences_postgres import clock, mutation, occurrences, zone
 pytestmark = pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL is not configured")
 
 PUBLIC_IDENTITY = {"user_id", "username", "display_name"}
-SHARED_FIELDS = {"id", "owner", "configuration", "local_date", "timezone", "server_time", "due_today", "occurrence"}
+SHARED_FIELDS = {"id", "owner", "configuration", "local_date", "timezone", "server_time", "due_today", "occurrence", "current_streak", "provisional", "calculated_at"}
 OCCURRENCE_FIELDS = {"id", "local_date", "timezone", "closes_at", "snapshot", "progress", "completed", "state"}
 
 

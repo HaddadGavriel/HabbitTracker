@@ -9,8 +9,9 @@ Recipients have read access through `/shared-habits`. Existing `/habits`,
 `/today`, and normal completion/progress endpoints retain their owner-only behavior.
 A grant does not allow a recipient to edit, archive, restore, complete, undo, or
 change progress. A currently authorized friend can also read and decide an
-[occurrence excuse](excuses.md) through its dedicated endpoints. Streak fields,
-general history endpoints, notifications, and mobile changes remain deferred.
+[occurrence excuse](excuses.md) through its dedicated endpoints. Shared views
+include [current streaks](history.md), while full occurrence history remains
+owner-only. Notifications and mobile changes remain deferred.
 
 ## Endpoints and errors
 
@@ -71,6 +72,9 @@ List entries and detail responses have the same shape:
 | `server_time` | Authoritative server instant used for this view |
 | `due_today` | Whether an occurrence exists for this owner-local date under the occurrence reconciliation policy |
 | `occurrence` | Today's occurrence below, or null when `due_today` is false |
+| `current_streak` | Number of completed/excused occurrences after the latest missed occurrence |
+| `provisional` | Whether that streak segment contains unresolved justification_pending occurrences |
+| `calculated_at` | Authoritative database instant used for reconciliation and streak calculation |
 
 An occurrence contains exactly:
 
@@ -95,6 +99,12 @@ Pending and excused occurrences retain their original progress and
 `completed: false`; excuses never count as ordinary completion in this response.
 Shared lists and Today do not include explanations or decision metadata. Read
 those through the dedicated excuse endpoint when currently authorized.
+
+The three streak fields are additive. They follow the exact
+[current streak and provisional rules](history.md#exact-streak-semantics), including
+late decisions, and are available even when `due_today` is false. Shared responses
+do not include full history. Recipients cannot use `/habits/{habit_id}/history`
+or `/habits/{habit_id}/streak`; those routes always require ownership.
 
 Shared views follow the existing [owner-timezone and reconciliation policies](occurrences.md).
 An authorized read reconciles stale occurrences before returning status, including
@@ -181,7 +191,9 @@ occurrence and deadline migrations from merged PR #9. Preserve all existing
 migration files and apply every unapplied
 file in filename order only through a separately authorized infrastructure release.
 The later [excuse migration](excuses.md#migrations-and-testing) extends these
-permissions with dedicated friend decisions.
+permissions with dedicated friend decisions, and the
+[history/streak migration](history.md#migrations-and-tests) adds current streak
+fields to shared views.
 This implementation does not merge, deploy, or apply migrations to a shared database.
 
 The suite includes API dependency tests, mocked HTTP adapter tests, and disposable
@@ -197,7 +209,7 @@ the scaffold and all migrations, then run from `backend`:
 ```powershell
 # With TEST_DATABASE_URL pointing only to the disposable local database:
 python -m pytest -q
-python -m pytest -q tests/test_friendships_postgres.py tests/test_habits_postgres.py tests/test_occurrences_postgres.py tests/test_sharing_postgres.py tests/test_excuses_postgres.py
+python -m pytest -q tests/test_friendships_postgres.py tests/test_habits_postgres.py tests/test_occurrences_postgres.py tests/test_sharing_postgres.py tests/test_excuses_postgres.py tests/test_history_postgres.py
 ```
 
 Without `TEST_DATABASE_URL`, PostgreSQL tests skip; this is not database

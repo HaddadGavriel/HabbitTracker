@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 from .habit_schemas import HabitCreate
+from .history_schemas import StreakFields
 from .schemas import PublicProfile
 
 
@@ -26,7 +27,7 @@ class SharedOccurrence(BaseModel):
     state: Literal["in_progress", "completed", "missed", "justification_pending", "excused"]
 
 
-class SharedHabitResult(BaseModel):
+class SharedHabitResult(StreakFields):
     id: UUID
     owner: PublicProfile
     configuration: HabitCreate

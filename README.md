@@ -1,6 +1,6 @@
 # Habit Tracker — profiles, friendships, and habit tracking
 
-This repository contains authenticated profiles, exact username lookup, friendships, private habit tracking, selective habit sharing, and occurrence excuses with friend decisions. It also retains the Android infrastructure proof. Backend contracts and PowerShell walkthroughs are in [`docs/friendships.md`](docs/friendships.md), [`docs/habits.md`](docs/habits.md), [`docs/occurrences.md`](docs/occurrences.md), [`docs/sharing.md`](docs/sharing.md), and [`docs/excuses.md`](docs/excuses.md).
+This repository contains authenticated profiles, exact username lookup, friendships, private habit tracking, selective habit sharing, occurrence excuses with friend decisions, owner occurrence history, and current streaks. It also retains the Android infrastructure proof. Backend contracts and PowerShell walkthroughs are in [`docs/friendships.md`](docs/friendships.md), [`docs/habits.md`](docs/habits.md), [`docs/occurrences.md`](docs/occurrences.md), [`docs/sharing.md`](docs/sharing.md), [`docs/excuses.md`](docs/excuses.md), and [`docs/history.md`](docs/history.md).
 
 ## Architecture
 
@@ -60,7 +60,7 @@ No database password or Firebase private credential belongs in the mobile `.env`
 
 1. Create a project at Supabase. In **Settings → API Keys**, create/copy a modern publishable (`sb_publishable_...`) key and a modern secret (`sb_secret_...`) key. The deprecated JWT-shaped `anon` and `service_role` keys are not used.
 2. In **Authentication → Providers → Email**, enable Email. For a fast test either disable **Confirm email** or keep it enabled and click the verification link before signing in.
-3. From the repository root link and apply the committed migration:
+3. During a separately authorized release, from the repository root link and apply the committed migrations:
 
    ```bash
    supabase login
@@ -68,7 +68,7 @@ No database password or Firebase private credential belongs in the mobile `.env`
    supabase db push
    ```
 
-   The CLI applies migrations in timestamp order, including `supabase/migrations/202610050003_friendships.sql` and the send-race fix in `supabase/migrations/202610060001_friend_request_races.sql`. If CLI access is unavailable, run each unapplied migration in filename order in **Supabase Dashboard → SQL Editor → New query → Run**; do not edit a migration that was already applied. Disposable PostgreSQL test setup is documented in [`docs/friendships.md`](docs/friendships.md).
+   The CLI applies unapplied migrations in timestamp order, through `supabase/migrations/202610080002_occurrence_history_streaks.sql`. That migration follows merged PR #11's occurrence excuses migration. If CLI access is unavailable, run each unapplied migration in filename order in **Supabase Dashboard → SQL Editor → New query → Run**; do not edit a migration that was already applied. Disposable PostgreSQL test setup is documented in [`docs/friendships.md`](docs/friendships.md). Implementation and tests do not apply shared database migrations or deploy the service.
 
 ### Profile onboarding and API
 
@@ -222,8 +222,8 @@ Open EAS's build link on the phone, download/install the APK, and approve Androi
 
 ## Deliberate limitations
 
-This proof stores Expo ticket IDs but does not poll Expo receipts or implement scheduled token cleanup. Expo ticket acceptance and actual Android display are distinct; the real-phone procedure is the delivery test. Profiles, exact username search, backend friendships, private habit tracking, selective sharing, and occurrence excuses with friend approval/rejection are implemented. Streaks, general history endpoints, social notifications, and mobile tracking UI remain deferred.
+This proof stores Expo ticket IDs but does not poll Expo receipts or implement scheduled token cleanup. Expo ticket acceptance and actual Android display are distinct; the real-phone procedure is the delivery test. Profiles, exact username search, backend friendships, private habit tracking, selective sharing, occurrence excuses with friend approval/rejection, owner history, and current streaks are implemented. Scheduled reminders, longest streaks, advanced analytics, social notifications, and mobile tracking UI remain deferred. Shared friends receive current streaks but cannot access full occurrence history.
 
 ## Private habit management
 
-The backend supports private habit configuration, schedules, reminder settings, and archive/restore. See [the habit API guide](docs/habits.md) for configuration contracts, and [daily occurrence tracking](docs/occurrences.md) for Today, complete/undo, target progress, reconciliation, lifecycle/timezone policies, migration steps, and PowerShell examples. Owners can [share individual habits with accepted friends](docs/sharing.md); recipients see the owner's Today. Owners may [submit occurrence excuses](docs/excuses.md): unshared submissions automatically approve, while currently authorized friends decide shared submissions. Recipients cannot edit habit configuration or normal completion/progress. Notification delivery and mobile tracking UI remain deferred.
+The backend supports private habit configuration, schedules, reminder settings, and archive/restore. See [the habit API guide](docs/habits.md) for configuration contracts, and [daily occurrence tracking](docs/occurrences.md) for Today, complete/undo, target progress, reconciliation, lifecycle/timezone policies, migration steps, and PowerShell examples. Owners can [share individual habits with accepted friends](docs/sharing.md); recipients see the owner's Today and current streak. Owners may [submit occurrence excuses](docs/excuses.md): unshared submissions automatically approve, while currently authorized friends decide shared submissions. [Occurrence history and current streaks](docs/history.md) documents owner-only paginated history, preserved snapshots, and provisional streaks that account for late excuse decisions. Recipients cannot edit habit configuration or normal completion/progress. Notification delivery and mobile tracking UI remain deferred.

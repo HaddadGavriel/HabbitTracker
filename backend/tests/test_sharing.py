@@ -68,6 +68,7 @@ class SharingDatabase(HabitDatabase):
         return {"id": habit, "owner": self.public(row["owner_id"]),
                 "configuration": {key: row[key] for key in HabitCreate.model_fields},
                 "local_date": "2026-03-02", "timezone": "Pacific/Kiritimati", "server_time": "2026-03-01T12:00:00Z",
+                "current_streak": 2, "provisional": True, "calculated_at": "2026-03-01T12:00:00Z",
                 "due_today": habit in self.occurrences, "occurrence": deepcopy(self.occurrences.get(habit))}
 
     async def list_shared_habits(self, actor):
@@ -164,6 +165,8 @@ def test_private_defaults_selective_grant_list_detail_and_idempotent_revoke(db):
         assert c.get(f"/shared-habits/{shared}").json() == rows[0]
         assert c.get(f"/shared-habits/{private}").json() == NOT_FOUND
         assert rows[0]["due_today"] is False and rows[0]["occurrence"] is None
+        assert rows[0]["current_streak"] == 2 and rows[0]["provisional"] is True
+        assert rows[0]["calculated_at"] == rows[0]["server_time"]
     with client(db, USERS[2]) as c:
         assert c.get("/shared-habits").json() == []
         assert c.get(f"/shared-habits/{shared}").json() == NOT_FOUND
@@ -313,20 +316,28 @@ def test_owner_local_today_and_snapshot_target_are_returned_without_recalculatio
 def test_response_models_allow_only_public_identity_and_shared_fields(db, monkeypatch):
     befriend(db)
     habit = create(db)
+    db.occurrences[habit] = {"id": str(uuid4()), "local_date": "2026-03-02", "timezone": "Pacific/Kiritimati",
+        "closes_at": "2026-03-02T10:00:00Z", "snapshot": {key: db.habits[habit][key] for key in HabitCreate.model_fields},
+        "progress": 0, "completed": False, "state": "justification_pending",
+        "excuse": {"explanation": "private excuse"}, "explanation": "private excuse", "owner_id": USERS[0]}
     original_public, original_view = db.public, db.shared_view
     monkeypatch.setattr(db, "public", lambda user: original_public(user) | {"email": "secret@example.com", "timezone": "UTC", "auth_metadata": {"private": True}})
     def private_view(actor, identifier):
         view = original_view(actor, identifier)
         if view is None: return None
-        return view | {"owner_id": USERS[0], "email": "secret@example.com", "streak": 17, "created_at": "2026-01-01T00:00:00Z"}
+        return view | {"owner_id": USERS[0], "email": "secret@example.com", "streak": 17,
+                       "history": [{"explanation": "private excuse"}], "explanation": "private excuse",
+                       "created_at": "2026-01-01T00:00:00Z"}
     monkeypatch.setattr(db, "shared_view", private_view)
     assert set(grant(db, habit)) == PUBLIC_FIELDS
     with client(db, USERS[0]) as c:
         assert set(c.get(f"/habits/{habit}/shares").json()[0]) == PUBLIC_FIELDS
     with client(db, USERS[1]) as c:
         for view in [c.get(f"/shared-habits/{habit}").json(), *c.get("/shared-habits").json()]:
-            assert set(view) == {"id", "owner", "configuration", "local_date", "timezone", "server_time", "due_today", "occurrence"}
+            assert set(view) == {"id", "owner", "configuration", "local_date", "timezone", "server_time", "due_today", "occurrence",
+                                 "current_streak", "provisional", "calculated_at"}
             assert set(view["owner"]) == PUBLIC_FIELDS
+            assert set(view["occurrence"]) == {"id", "local_date", "timezone", "closes_at", "snapshot", "progress", "completed", "state"}
             assert "streak" not in view
 
 

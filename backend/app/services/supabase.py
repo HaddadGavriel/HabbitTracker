@@ -39,6 +39,11 @@ class ExcuseError(Exception):
         self.code = code
 
 
+class HistoryError(Exception):
+    def __init__(self, code: str):
+        self.code = code
+
+
 class SupabaseDatabase:
     def __init__(self, settings: Settings):
         self.base_url = f"{settings.supabase_url.rstrip('/')}/rest/v1"
@@ -323,6 +328,32 @@ class SupabaseDatabase:
 
     async def get_shared_habit(self, user_id: str, habit_id: str) -> dict | None:
         return await self._sharing_rpc("get_shared_habit", {"p_recipient": user_id, "p_habit": habit_id})
+
+    async def _history_rpc(self, function: str, body: dict) -> dict | None:
+        response = await self._rpc(function, body)
+        if response.status_code == 400:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            if isinstance(payload, dict) and payload.get("code") == "P0001" and payload.get("message") in (
+                "profile_not_found", "invalid_history_cursor", "invalid_history_range", "invalid_history_limit",
+            ):
+                raise HistoryError(payload["message"])
+        response.raise_for_status()
+        rows = response.json()
+        return rows[0] if rows else None
+
+    async def get_habit_history(self, user_id: str, habit_id: str, limit: int = 30,
+                               from_date: str | None = None, to_date: str | None = None,
+                               cursor: dict | None = None) -> dict | None:
+        return await self._history_rpc("get_habit_history", {
+            "p_owner": user_id, "p_habit": habit_id, "p_limit": limit,
+            "p_from_date": from_date, "p_to_date": to_date, "p_cursor": cursor,
+        })
+
+    async def get_habit_streak(self, user_id: str, habit_id: str) -> dict | None:
+        return await self._history_rpc("get_habit_streak", {"p_owner": user_id, "p_habit": habit_id})
 
     async def _excuse_rpc(self, function: str, body: dict, *, many: bool = False):
         codes = {
