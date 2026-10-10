@@ -21,7 +21,7 @@ export default function MyHabits() {
     onRefresh={store.reload}
     ListHeaderComponent={<View style={localStyles.header}>
       <Text accessibilityRole="header" style={styles.title}>My habits</Text>
-      <Text style={styles.message}>Your active habits. Pull down to refresh.</Text>
+      <Text style={styles.message}>Your active habits. Pull down to refesh.</Text>
       {(loading || (!hasLoaded && !error)) && <ActivityIndicator accessibilityLabel="Loading habits" size="large" />}
       {error && <View style={localStyles.header}>
         <Text accessibilityLiveRegion="polite" style={styles.message}>{error}</Text>
