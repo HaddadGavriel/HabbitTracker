@@ -66,6 +66,54 @@ test('profile-not-found preserves onboarding code and status', async () => {
   await assert.rejects(api.readProfile(session), failure(api, 404, 'profile_not_found', message));
 });
 
+test('habits GET requests active habits with the supplied current session and preserves the array contract', async () => {
+  const binary = {
+    id: '00000000-0000-0000-0000-000000000001', owner_id: '00000000-0000-0000-0000-000000000010',
+    name: 'Read before bed', description: null, type: 'binary', target: null, unit: null,
+    schedule: 'daily', weekdays: [], reminder_times: ['08:00', '21:30'],
+    created_at: profile.created_at, updated_at: profile.updated_at, archived_at: null,
+  };
+  const target = {
+    ...binary, id: '00000000-0000-0000-0000-000000000002', name: 'Walk', description: 'Take a walk outdoors',
+    type: 'target', target: 5000, unit: 'steps', schedule: 'selected', weekdays: [1, 3, 7], reminder_times: ['18:00'],
+  };
+  const habits = [binary, target, { ...target, id: '00000000-0000-0000-0000-000000000003', unit: null }];
+  const calls = [];
+  const api = client(async (url, init) => {
+    calls.push({ url, init });
+    return json(200, habits);
+  });
+  assert.deepEqual(await api.listHabits(session), habits);
+  assert.deepEqual(await api.listHabits({ ...session, access_token: 'refreshed-access' }), habits);
+  assert.equal(calls.length, 2);
+  for (const { url, init } of calls) {
+    assert.equal(url, 'https://api.example.test/habits?status=active');
+    assert.equal(init.method, 'GET');
+    assert.equal(init.body, undefined);
+    assert.ok(init.signal instanceof AbortSignal);
+  }
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer current-access-secret');
+  assert.equal(calls[1].init.headers.Authorization, 'Bearer refreshed-access');
+});
+
+test('an account without active habits returns an empty array', async () => {
+  const api = client(async () => json(200, []));
+  assert.deepEqual(await api.listHabits(session), []);
+});
+
+test('habit list errors remain typed errors and never become empty results', async () => {
+  for (const [status, detail, code, message] of [
+    [404, { code: 'profile_not_found', message: 'Create a profile to complete onboarding' }, 'profile_not_found', 'Create a profile to complete onboarding'],
+    [401, 'Invalid or expired Supabase access token', 'http_401', 'Invalid or expired Supabase access token'],
+    [503, null, 'http_503', 'API failed with HTTP 503'],
+  ]) {
+    const api = client(async () => json(status, { detail }));
+    await assert.rejects(api.listHabits(session), failure(api, status, code, message));
+  }
+  const api = client(async () => { throw new Error(`fetch failed ${session.access_token}`); });
+  await assert.rejects(api.listHabits(session), failure(api, null, 'network_error', 'Unable to reach the API. Check your connection.'));
+});
+
 test('structured conflicts preserve codes/messages and mutations are not retried', async () => {
   for (const [code, message] of [
     ['username_taken', 'That username is already taken'],

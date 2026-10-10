@@ -85,6 +85,27 @@ export const readProfile = (session: Session) =>
 export const createProfile = (session: Session, profile: ProfileCreate) =>
   request<ProfileResult>('/profiles/me', session, { method: 'POST', body: JSON.stringify(profile) });
 
+/** Weekdays use ISO numbering: Monday = 1, Sunday = 7; daily schedules return []. */
+export type HabitResult = {
+  id: string;
+  owner_id: string;
+  name: string;
+  description: string | null;
+  schedule: 'daily' | 'selected';
+  weekdays: (1 | 2 | 3 | 4 | 5 | 6 | 7)[];
+  reminder_times: string[];
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+} & (
+  | { type: 'binary'; target: null; unit: null }
+  | { type: 'target'; target: number; unit: string | null }
+);
+
+/** Owner identity comes from the current session; the backend returns an array. */
+export const listHabits = (session: Session) =>
+  request<HabitResult[]>('/habits?status=active', session, { method: 'GET' });
+
 export const registerDevice = (session: Session, expoPushToken: string) =>
   request<{ registered: boolean; updated_at: string }>('/devices/register', session, {
     method: 'POST', body: JSON.stringify({ expo_push_token: expoPushToken, platform: 'android' }),
