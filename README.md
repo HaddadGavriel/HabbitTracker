@@ -70,6 +70,8 @@ No database password or Firebase private credential belongs in the mobile `.env`
 
    The CLI applies unapplied migrations in timestamp order, through `supabase/migrations/202610090001_friend_reminders.sql`. That migration follows merged PR #12's occurrence history/streak migration and must be applied before deploying the matching backend. It also makes device tokens globally unique, retaining the most recently updated registration when historical duplicates exist. If CLI access is unavailable, run each unapplied migration in filename order in **Supabase Dashboard → SQL Editor → New query → Run**; do not edit a migration that was already applied. Disposable PostgreSQL test setup is documented in [`docs/friendships.md`](docs/friendships.md). Implementation and tests do not apply shared database migrations or deploy the service.
 
+The mobile app now provides email/password authentication, profile onboarding, a minimal identity home, and infrastructure diagnostics. See the [Android authentication walkthrough](docs/mobile-auth-walkthrough.md) for device validation and automated coverage.
+
 ### Profile onboarding and API
 
 The onboarding sequence is deliberately explicit: (1) sign up or sign in with Supabase email/password, (2) send that session's access token to `POST /profiles/me`, then (3) use the authenticated read, update, and search endpoints. Existing Supabase Auth users simply receive `profile_not_found` until they perform step 2; there is no signup trigger, generated username, or email/password copy in `profiles`.
@@ -205,7 +207,7 @@ Open EAS's build link on the phone, download/install the APK, and approve Androi
 2. Deploy Render, verify `/health`, store its HTTPS URL in the EAS `preview` environment, and make the EAS preview APK.
 3. Install and launch the APK on a physical Android device with internet access.
 4. Enter an email/password and tap **Sign up**. Confirm email if the Supabase setting requires it, then **Sign in**.
-5. Tap **Register notifications** and choose **Allow**. The app obtains an Expo token and sends it with the Supabase access token to `POST /devices/register`; confirm the green/check diagnostic text and the database row.
+5. Complete profile onboarding, then open **Infrastructure diagnostics** from home. Tap **Register notifications** and choose **Allow**. The app obtains an Expo token and sends it with the Supabase access token to `POST /devices/register`; confirm the green/check diagnostic text and the database row.
 6. Tap **Run Infrastructure Test**. The client generates the ID and timestamp. FastAPI authenticates the caller, inserts and reads back the row, updates verification state, reads that user's latest token, calls Expo, saves the ticket, and responds with timings.
 7. Compare the on-screen request ID to the notification body. The API, database, and push-request stages plus client/server timings appear on screen. Foreground receipt is also shown when observable.
 8. Background or force-close the app, reopen it if needed to register/authenticate, then start another test and immediately background it. The OS notification must still arrive with that run's ID; no local-notification API is called anywhere.
