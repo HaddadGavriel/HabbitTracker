@@ -10,7 +10,7 @@ function Routes() {
     <Stack.Protected guard={access.pending}><Stack.Screen name="index" /></Stack.Protected>
     <Stack.Protected guard={access.auth}><Stack.Screen name="sign-in" /><Stack.Screen name="sign-up" /></Stack.Protected>
     <Stack.Protected guard={access.onboarding}><Stack.Screen name="onboarding" /></Stack.Protected>
-    <Stack.Protected guard={access.home}><Stack.Screen name="home" /><Stack.Screen name="my-habits" options={{ headerTitle: 'My habits' }} /><Stack.Screen name="diagnostics" options={{ title: 'Infrastructure diagnostics' }} /></Stack.Protected>
+    <Stack.Protected guard={access.home}><Stack.Screen name="home" /><Stack.Screen name="my-habits" options={{ headerTitle: 'My habits' }} /><Stack.Screen name="create-habit" options={{ headerTitle: 'Create habit' }} /><Stack.Screen name="diagnostics" options={{ title: 'Infrastructure diagnostics' }} /></Stack.Protected>
   </Stack>;
 }
 export default function RootLayout() { return <SessionProvider><Routes /></SessionProvider>; }
