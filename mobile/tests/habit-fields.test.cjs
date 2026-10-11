@@ -108,3 +108,37 @@ test('creation retains its type selector and all field controls respect disabled
     assert.equal(choice.props.accessibilityState.disabled, true);
   }
 });
+
+test('editor load-error retry requests a reload without attempting a save', () => {
+  let reads = 0, saves = 0;
+  const state = { draft: null, loading: false, saving: false, saved: false,
+    error: 'Unable to load this habit.', ambiguous: false, unavailable: null };
+  const store = { subscribe() {}, snapshot: () => state,
+    reload: () => { reads++; }, save: () => { saves++; } };
+  const screenModules = {
+    'react/jsx-runtime': modules['react/jsx-runtime'],
+    react: { useCallback: fn => fn, useState: () => [store],
+      useSyncExternalStore: (_subscribe, snapshot) => snapshot() },
+    'expo-router': { router: {}, useFocusEffect() {},
+      useLocalSearchParams: () => ({ id: '00000000-0000-0000-0000-000000000001' }) },
+    'react-native': { Button: 'Button', Text: 'Text', Keyboard: {} },
+    '../components/form': { Form: 'Form', Loading: 'Loading', Message: 'Message', styles: {} },
+    '../components/habit-fields': { HabitFields: 'HabitFields' },
+    '../lib/api': {},
+    '../lib/edit-habit-store': {},
+    '../lib/session': { useSession: () => ({ store: {}, profile: { timezone: 'UTC' } }) },
+  };
+  const screen = {};
+  vm.runInNewContext(ts.transpileModule(readFileSync(join(__dirname, '../app/edit-habit.tsx'), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+  }).outputText, { exports: screen, require: name => {
+    assert.ok(screenModules[name], `Unexpected dependency: ${name}`);
+    return screenModules[name];
+  } });
+  const retry = nodes(screen.default()).find(node => node.type === 'Button' && node.props.title === 'Retry loading');
+  assert.ok(retry);
+  assert.equal(retry.props.disabled, false);
+  retry.props.onPress();
+  assert.equal(reads, 1);
+  assert.equal(saves, 0);
+});
