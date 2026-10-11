@@ -123,6 +123,23 @@ export const createHabit = (session: Session, habit: HabitCreate) =>
 export const listHabits = (session: Session) =>
   request<HabitResult[]>('/habits?status=active', session, { method: 'GET' });
 
+/** Omitted fields stay unchanged; only these three nullable fields can be cleared. */
+export type HabitUpdate = {
+  name?: string;
+  description?: string | null;
+  target?: number | null;
+  unit?: string | null;
+  schedule?: 'daily' | 'selected';
+  weekdays?: HabitWeekday[];
+  reminder_times?: string[];
+};
+
+export const readHabit = (session: Session, id: string) =>
+  request<HabitResult>(`/habits/${encodeURIComponent(id)}`, session, { method: 'GET' });
+
+export const updateHabit = (session: Session, id: string, changes: HabitUpdate) =>
+  request<HabitResult>(`/habits/${encodeURIComponent(id)}`, session, { method: 'PATCH', body: JSON.stringify(changes) });
+
 export const registerDevice = (session: Session, expoPushToken: string) =>
   request<{ registered: boolean; updated_at: string }>('/devices/register', session, {
     method: 'POST', body: JSON.stringify({ expo_push_token: expoPushToken, platform: 'android' }),
