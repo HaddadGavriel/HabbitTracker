@@ -41,7 +41,7 @@ export default function CreateHabit() {
     <Text style={styles.label}>Schedule</Text>
     <View style={localStyles.choices}>
       <Choice label="Every day" selected={draft.schedule === 'daily'} disabled={disabled} onPress={() => store.update({ schedule: 'daily' })} />
-      <Choice label="Selected weekdays" selected={draft.schedule === 'selected'} disabled={disabled} onPress={() => store.update({ schedule: 'selected', weekdays: [] })} />
+      <Choice label="Selected weekdays" selected={draft.schedule === 'selected'} disabled={disabled} onPress={() => store.update({ schedule: 'selected' })} />
     </View>
     {draft.schedule === 'selected' && <View style={localStyles.choices}>
       {days.map((label, index) => {
