@@ -35,7 +35,7 @@ function Editor({ id }: { id: string }) {
       <Text style={styles.message}>Habit type cannot be changed.</Text>
     </>}
     <Message text={error} />
-    {!draft && error && !unavailable && <Button title="Retry loading" disabled={loading} onPress={store.save} />}
+    {!draft && error && !unavailable && <Button title="Retry loading" disabled={loading} onPress={store.reload} />}
     {ambiguous && draft && <>
       <Text style={styles.message}>Reloading replaces all unsaved edits with the configuration currently saved on the server.</Text>
       <Button title="Reload saved configuration" disabled={disabled} onPress={store.reload} />
