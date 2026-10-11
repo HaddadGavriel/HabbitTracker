@@ -33,7 +33,7 @@ const deferred = () => {
   return { promise, resolve, reject };
 };
 const flush = () => new Promise(resolve => setImmediate(resolve));
-async function setup(listHabits, readProfile = async s => profile(s.user.id), initial = session('a')) {
+async function setup(listHabits, readProfile = async s => profile(s.user.id), initial = session('a'), restoreHabit = async (_s, id) => habit({ id })) {
   let callback;
   const auth = {
     getSession: async () => ({ data: { session: initial } }),
@@ -42,12 +42,13 @@ async function setup(listHabits, readProfile = async s => profile(s.user.id), in
   };
   const sessions = new SessionStore(auth, { readProfile, createProfile: async s => profile(s.user.id) });
   await sessions.start();
-  return { store: new HabitsStore(sessions, listHabits), sessions, auth, event: s => callback('SIGNED_IN', s) };
+  return { store: new HabitsStore(sessions, listHabits, restoreHabit), sessions, auth, event: s => callback('SIGNED_IN', s) };
 }
 function empty(store, expected = {}) {
   const state = store.snapshot();
   assert.deepEqual({ ...state, habits: Array.from(state.habits) }, {
-    habits: [], hasLoaded: false, loading: false, refreshing: false, error: null, ...expected,
+    habits: [], status: 'active', hasLoaded: false, loading: false, refreshing: false, error: null,
+    restoreConfirmation: null, restoringId: null, restoreError: null, restoreUncertain: false, ...expected,
   });
 }
 
@@ -270,4 +271,336 @@ test('type labels explain binary and target habits with an optional unit', () =>
   assert.equal(habitType(habit()), 'Binary (yes/no)');
   assert.equal(habitType(habit({ type: 'target', target: 2, unit: 'litres' })), 'Target: 2 litres');
   assert.equal(habitType(habit({ type: 'target', target: 10, unit: null })), 'Target: 10');
+});
+
+const archived = (overrides = {}) => habit({ archived_at: '2026-10-10T13:00:00Z', ...overrides });
+async function archivedSetup(restoreHabit, listHabits = async () => [archived()]) {
+  const x = await setup(listHabits, undefined, undefined, restoreHabit);
+  x.store.start();
+  await flush();
+  x.store.setStatus('archived');
+  await flush();
+  return x;
+}
+
+test('Active is the default backend filter; changing filter clears previous rows and loads archived habits', async () => {
+  const archivedRead = deferred();
+  const calls = [];
+  const x = await setup((s, status) => {
+    calls.push([s.user.id, status]);
+    return status === 'archived' ? archivedRead.promise : Promise.resolve([habit()]);
+  });
+  x.store.start();
+  await flush();
+  assert.deepEqual(calls, [['a', 'active']]);
+  x.store.setStatus('active');
+  assert.equal(calls.length, 1);
+  x.store.setStatus('archived');
+  empty(x.store, { status: 'archived', loading: true });
+  assert.deepEqual(calls[1], ['a', 'archived']);
+  archivedRead.resolve([habit(), archived()]);
+  await flush();
+  assert.equal(x.store.snapshot().habits.length, 1);
+  assert.ok(x.store.snapshot().habits[0].archived_at);
+  x.store.setStatus('active');
+  empty(x.store, { loading: true });
+  await flush();
+  assert.equal(x.store.snapshot().habits[0].archived_at, null);
+});
+
+test('filter changes invalidate late successes and failures from earlier filters', async () => {
+  for (const outcome of ['success', 'error']) {
+    const old = deferred();
+    const x = await setup((_s, status) => status === 'active' ? old.promise : Promise.resolve([archived()]));
+    x.store.start();
+    x.store.setStatus('archived');
+    await flush();
+    const accepted = x.store.snapshot();
+    if (outcome === 'success') old.resolve([habit()]);
+    else old.reject(new ApiError('Old read failure', 503, 'http_503'));
+    await flush();
+    assert.equal(x.store.snapshot(), accepted);
+    assert.equal(accepted.status, 'archived');
+  }
+});
+
+test('restore requires current archived-card confirmation, and cancellation does not mutate or refresh', async () => {
+  let restores = 0, reads = 0;
+  const x = await archivedSetup(async () => { restores++; return habit(); }, async () => { reads++; return [archived()]; });
+  const item = x.store.snapshot().habits[0];
+  await x.store.confirmRestore(item);
+  assert.equal(restores, 0);
+  x.store.requestRestore(item);
+  assert.equal(x.store.snapshot().restoreConfirmation, item);
+  assert.equal(restores, 0);
+  x.store.cancelRestore(item);
+  assert.equal(x.store.snapshot().restoreConfirmation, null);
+  await x.store.confirmRestore(item);
+  assert.equal(restores, 0);
+  assert.equal(reads, 2);
+  x.store.setStatus('active');
+  await flush();
+  x.store.requestRestore(item);
+  assert.equal(x.store.snapshot().restoreConfirmation, null);
+});
+
+test('confirmed restore is single-flight and refreshes the archived list only after success', async () => {
+  const mutation = deferred(), refresh = deferred();
+  const supplied = [], statuses = [];
+  const x = await archivedSetup((s, id) => { supplied.push([s, id]); return mutation.promise; }, async (_s, status) => {
+    statuses.push(status);
+    return statuses.length > 2 ? refresh.promise : [archived()];
+  });
+  const item = x.store.snapshot().habits[0];
+  x.store.requestRestore(item);
+  const pending = x.store.confirmRestore(item);
+  assert.equal(x.store.snapshot().restoringId, item.id);
+  assert.equal(x.store.snapshot().restoreConfirmation, null);
+  x.store.requestRestore(item);
+  await x.store.confirmRestore(item);
+  await x.store.reload();
+  assert.equal(supplied.length, 1);
+  assert.equal(supplied[0][0].user.id, 'a');
+  assert.equal(supplied[0][1], item.id);
+  assert.equal(statuses.length, 2);
+  mutation.resolve(habit());
+  await flush();
+  assert.deepEqual(statuses, ['active', 'archived', 'archived']);
+  assert.equal(x.store.snapshot().refreshing, true);
+  assert.equal(x.store.snapshot().restoringId, null);
+  assert.equal(x.store.snapshot().habits.length, 0);
+  refresh.resolve([]);
+  await pending;
+  assert.equal(x.store.snapshot().refreshing, false);
+  assert.equal(x.store.snapshot().restoreError, null);
+});
+
+test('restore success remains reflected when the required list refresh fails', async () => {
+  let reads = 0, restores = 0;
+  const x = await archivedSetup(async () => { restores++; return habit(); }, async () => {
+    if (++reads > 2) throw new ApiError('Offline', null, 'network_error');
+    return [archived()];
+  });
+  const item = x.store.snapshot().habits[0];
+  x.store.requestRestore(item);
+  await x.store.confirmRestore(item);
+  assert.equal(restores, 1);
+  assert.equal(reads, 3);
+  assert.equal(x.store.snapshot().habits.length, 0);
+  assert.match(x.store.snapshot().error, /connection/i);
+  assert.equal(x.store.snapshot().restoreError, null);
+});
+
+test('definite restore failures preserve the card, show a safe error, and require another confirmation to retry', async () => {
+  for (const [error, message] of [
+    [new ApiError('Expired token', 401, 'http_401'), /verify your session/],
+    [new ApiError('Not owned', 404, 'habit_not_found'), /no longer available/],
+    [new ApiError('Private implementation detail', 422, 'http_422'), /unable to restore/i],
+  ]) {
+    let restores = 0, reads = 0;
+    const x = await archivedSetup(async () => { restores++; throw error; }, async () => { reads++; return [archived()]; });
+    const item = x.store.snapshot().habits[0];
+    x.store.requestRestore(item);
+    await x.store.confirmRestore(item);
+    assert.equal(x.store.snapshot().habits[0], item);
+    assert.equal(x.store.snapshot().restoreUncertain, false);
+    assert.equal(x.store.snapshot().restoringId, null);
+    assert.match(x.store.snapshot().restoreError, message);
+    assert.ok(!x.store.snapshot().restoreError.includes('Private implementation detail'));
+    await x.store.confirmRestore(item);
+    assert.equal(restores, 1);
+    assert.equal(reads, 2);
+    x.store.requestRestore(item);
+    await x.store.confirmRestore(item);
+    assert.equal(restores, 2);
+  }
+});
+
+test('ambiguous restore errors never retry automatically and require a successful current-state refresh before retrying', async () => {
+  for (const error of [
+    new ApiError('deadline', null, 'request_timeout'), new ApiError('timeout', 408, 'http_408'),
+    new ApiError('Offline', null, 'network_error'), new ApiError('Server unavailable', 503, 'http_503'),
+    new Error('Unknown upstream error'),
+  ]) {
+    let reads = 0, restores = 0, failRead = false;
+    const x = await archivedSetup(async () => { restores++; throw error; }, async () => {
+      reads++;
+      if (failRead) throw new ApiError('Offline', null, 'network_error');
+      return [archived()];
+    });
+    let item = x.store.snapshot().habits[0];
+    x.store.requestRestore(item);
+    await x.store.confirmRestore(item);
+    assert.equal(x.store.snapshot().restoreUncertain, true);
+    assert.match(x.store.snapshot().restoreError, /may have succeeded.*refresh current server state/i);
+    x.store.requestRestore(item);
+    await x.store.confirmRestore(item);
+    assert.equal(x.store.snapshot().restoreConfirmation, null);
+    assert.equal(restores, 1);
+    assert.equal(reads, 2);
+    failRead = true;
+    await x.store.reload();
+    assert.equal(x.store.snapshot().restoreUncertain, true);
+    assert.match(x.store.snapshot().error, /connection/i);
+    failRead = false;
+    await x.store.reload();
+    assert.equal(x.store.snapshot().restoreUncertain, false);
+    assert.equal(x.store.snapshot().restoreError, null);
+    assert.equal(restores, 1);
+    item = x.store.snapshot().habits[0];
+    x.store.requestRestore(item);
+    await x.store.confirmRestore(item);
+    assert.equal(restores, 2);
+  }
+});
+
+test('refresh after ambiguous restore removes a habit if the server already restored it', async () => {
+  let reads = 0, restores = 0;
+  const x = await archivedSetup(async () => { restores++; throw new ApiError('Deadline', null, 'request_timeout'); }, async () => ++reads > 2 ? [] : [archived()]);
+  const item = x.store.snapshot().habits[0];
+  x.store.requestRestore(item);
+  await x.store.confirmRestore(item);
+  await x.store.reload();
+  assert.equal(restores, 1);
+  assert.equal(x.store.snapshot().habits.length, 0);
+  assert.equal(x.store.snapshot().restoreUncertain, false);
+  assert.equal(x.store.snapshot().restoreError, null);
+});
+
+test('restore response identity and lifecycle mismatches are ambiguous and do not refresh', async () => {
+  for (const result of [habit({ owner_id: 'b' }), habit({ id: 'other' }), archived()]) {
+    let reads = 0;
+    const x = await archivedSetup(async () => result, async () => { reads++; return [archived()]; });
+    const item = x.store.snapshot().habits[0];
+    x.store.requestRestore(item);
+    await x.store.confirmRestore(item);
+    assert.equal(reads, 2);
+    assert.equal(x.store.snapshot().restoreUncertain, true);
+    assert.equal(x.store.snapshot().habits[0], item);
+  }
+});
+
+test('filter changes, navigation, account changes, and refresh invalidate stale confirmations and card handlers', async () => {
+  for (const transition of ['filter', 'navigation', 'account', 'refresh']) {
+    let restores = 0;
+    const x = await archivedSetup(async () => { restores++; return habit(); }, async s => [archived({ owner_id: s.user.id })]);
+    const oldItem = x.store.snapshot().habits[0];
+    x.store.requestRestore(oldItem);
+    if (transition === 'filter') { x.store.setStatus('active'); x.store.setStatus('archived'); }
+    if (transition === 'navigation') { x.store.stop(); x.store.start(); await flush(); x.store.setStatus('archived'); }
+    if (transition === 'account') { x.event(session('b')); await flush(); x.store.setStatus('archived'); }
+    if (transition === 'refresh') await x.store.reload();
+    await flush();
+    assert.equal(x.store.snapshot().restoreConfirmation, null);
+    x.store.requestRestore(oldItem);
+    await x.store.confirmRestore(oldItem);
+    assert.equal(restores, 0);
+    const currentItem = x.store.snapshot().habits[0];
+    x.store.requestRestore(currentItem);
+    x.store.cancelRestore(oldItem);
+    await x.store.confirmRestore(oldItem);
+    assert.equal(x.store.snapshot().restoreConfirmation, currentItem);
+    assert.equal(restores, 0);
+  }
+});
+
+test('pending restore ignores late success and error after filter changes or leaving and reopening', async () => {
+  for (const transition of ['filter', 'navigation']) for (const outcome of ['success', 'error']) {
+    const old = deferred();
+    let restores = 0, reads = 0;
+    const x = await archivedSetup(async () => { restores++; return old.promise; }, async () => { reads++; return [archived()]; });
+    const item = x.store.snapshot().habits[0];
+    x.store.requestRestore(item);
+    const pending = x.store.confirmRestore(item);
+    if (transition === 'filter') { x.store.setStatus('active'); x.store.setStatus('archived'); }
+    else { x.store.stop(); x.store.start(); await flush(); x.store.setStatus('archived'); }
+    await flush();
+    const current = x.store.snapshot().habits[0];
+    assert.equal(x.store.snapshot().restoringId, item.id);
+    x.store.requestRestore(current);
+    await x.store.confirmRestore(current);
+    assert.equal(restores, 1);
+    const acceptedReads = reads;
+    if (outcome === 'success') old.resolve(habit());
+    else old.reject(new ApiError('Late failure', null, 'network_error'));
+    await pending;
+    assert.equal(reads, acceptedReads);
+    assert.equal(x.store.snapshot().habits[0], current);
+    assert.equal(x.store.snapshot().restoreError, null);
+    assert.equal(x.store.snapshot().restoreUncertain, false);
+    assert.equal(x.store.snapshot().restoringId, null);
+  }
+});
+
+test('account changes and sign-out clear restore state and ignore late mutation outcomes', async () => {
+  for (const transition of ['account', 'signout']) for (const outcome of ['success', 'error']) {
+    const old = deferred(), profileB = deferred();
+    let reads = 0;
+    const x = await setup(async s => { reads++; return [archived({ owner_id: s.user.id })]; },
+      async s => s.user.id === 'b' ? profileB.promise : profile('a'), undefined, () => old.promise);
+    x.store.start();
+    await flush();
+    x.store.setStatus('archived');
+    await flush();
+    const item = x.store.snapshot().habits[0];
+    x.store.requestRestore(item);
+    const pending = x.store.confirmRestore(item);
+    let signingOut;
+    if (transition === 'account') x.event(session('b'));
+    else signingOut = x.sessions.signOut();
+    empty(x.store);
+    if (outcome === 'success') old.resolve(habit());
+    else old.reject(new ApiError('Late timeout', null, 'request_timeout'));
+    await pending;
+    await signingOut;
+    empty(x.store);
+    assert.equal(reads, 2);
+    if (transition === 'account') {
+      profileB.resolve(profile('b'));
+      await flush();
+      assert.equal(x.store.snapshot().status, 'active');
+      assert.equal(x.store.snapshot().restoreError, null);
+    }
+  }
+});
+
+test('same-account token refresh preserves the pending restore guard and refreshes with the new token after success', async () => {
+  const mutation = deferred();
+  const supplied = [];
+  let restores = 0;
+  const x = await archivedSetup(async () => { restores++; return mutation.promise; }, async s => { supplied.push(s); return [archived()]; });
+  const item = x.store.snapshot().habits[0];
+  x.store.requestRestore(item);
+  const pending = x.store.confirmRestore(item);
+  const fresh = { ...session('a'), access_token: 'new-a-token' };
+  x.event(fresh);
+  x.store.requestRestore(item);
+  await x.store.confirmRestore(item);
+  assert.equal(restores, 1);
+  assert.equal(x.store.snapshot().restoringId, item.id);
+  assert.equal(supplied.length, 2);
+  mutation.resolve(habit());
+  await pending;
+  assert.equal(supplied.length, 3);
+  assert.equal(supplied[2], fresh);
+  assert.equal(x.store.snapshot().restoringId, null);
+});
+
+test('repeated recovery refresh taps issue one GET and never repeat an ambiguous restore', async () => {
+  const refresh = deferred();
+  let reads = 0, restores = 0;
+  const x = await archivedSetup(async () => { restores++; throw new ApiError('Deadline', null, 'request_timeout'); }, async () => ++reads > 2 ? refresh.promise : [archived()]);
+  const item = x.store.snapshot().habits[0];
+  x.store.requestRestore(item);
+  await x.store.confirmRestore(item);
+  const first = x.store.refreshServerState();
+  await x.store.refreshServerState();
+  await x.store.refreshServerState();
+  assert.equal(reads, 3);
+  assert.equal(restores, 1);
+  assert.equal(x.store.snapshot().refreshing, true);
+  refresh.resolve([archived()]);
+  await first;
+  assert.equal(x.store.snapshot().restoreUncertain, false);
+  assert.equal(restores, 1);
 });

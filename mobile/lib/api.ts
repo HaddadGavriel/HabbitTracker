@@ -120,8 +120,10 @@ export const createHabit = (session: Session, habit: HabitCreate) =>
   request<HabitResult>('/habits', session, { method: 'POST', body: JSON.stringify(habit) });
 
 /** Owner identity comes from the current session; the backend returns an array. */
-export const listHabits = (session: Session) =>
-  request<HabitResult[]>('/habits?status=active', session, { method: 'GET' });
+export type HabitStatus = 'active' | 'archived' | 'all';
+
+export const listHabits = (session: Session, status: HabitStatus = 'active') =>
+  request<HabitResult[]>(`/habits?status=${encodeURIComponent(status)}`, session, { method: 'GET' });
 
 /** Omitted fields stay unchanged; only these three nullable fields can be cleared. */
 export type HabitUpdate = {
@@ -139,6 +141,13 @@ export const readHabit = (session: Session, id: string) =>
 
 export const updateHabit = (session: Session, id: string, changes: HabitUpdate) =>
   request<HabitResult>(`/habits/${encodeURIComponent(id)}`, session, { method: 'PATCH', body: JSON.stringify(changes) });
+
+/** Lifecycle mutations preserve history/configuration and accept an absent body. */
+export const archiveHabit = (session: Session, id: string) =>
+  request<HabitResult>(`/habits/${encodeURIComponent(id)}/archive`, session, { method: 'POST' });
+
+export const restoreHabit = (session: Session, id: string) =>
+  request<HabitResult>(`/habits/${encodeURIComponent(id)}/restore`, session, { method: 'POST' });
 
 export const registerDevice = (session: Session, expoPushToken: string) =>
   request<{ registered: boolean; updated_at: string }>('/devices/register', session, {

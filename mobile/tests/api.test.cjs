@@ -101,6 +101,22 @@ test('an account without active habits returns an empty array', async () => {
   assert.deepEqual(await api.listHabits(session), []);
 });
 
+test('habit filters use the backend status parameter and return the server array', async () => {
+  const calls = [];
+  const api = client(async (url, init) => {
+    calls.push({ url, init });
+    return json(200, []);
+  });
+  for (const status of ['active', 'archived', 'all']) {
+    assert.deepEqual(await api.listHabits(session, status), []);
+    assert.equal(calls.at(-1).url, `https://api.example.test/habits?status=${status}`);
+    assert.equal(calls.at(-1).init.method, 'GET');
+    assert.equal(calls.at(-1).init.body, undefined);
+    assert.equal(calls.at(-1).init.headers.Authorization, 'Bearer current-access-secret');
+  }
+  assert.equal(calls.length, 3);
+});
+
 test('habit list errors remain typed errors and never become empty results', async () => {
   for (const [status, detail, code, message] of [
     [404, { code: 'profile_not_found', message: 'Create a profile to complete onboarding' }, 'profile_not_found', 'Create a profile to complete onboarding'],
@@ -278,6 +294,89 @@ test('habit PATCH timeout warns about possible processing and ignores a late res
   finish(json(200, { ...binaryCreate, id: 'habit-id', description: null }));
   await assert.rejects(pending, failure(api, null, 'request_timeout', 'API request timed out after 30 seconds. The server may have processed the request.'));
   assert.equal(requests, 1);
+});
+
+test('archive and restore POST encoded IDs with current credentials, no body and complete habit results', async () => {
+  const existing = {
+    ...binaryCreate, id: 'habit-id', owner_id: 'owner-id', description: null, target: null, unit: null,
+    created_at: profile.created_at, updated_at: profile.updated_at, archived_at: null,
+  };
+  const archived = { ...existing, archived_at: '2026-10-11T12:00:00Z', updated_at: '2026-10-11T12:00:00Z' };
+  const restored = { ...existing, updated_at: '2026-10-11T13:00:00Z' };
+  const calls = [];
+  const api = client(async (url, init) => {
+    calls.push({ url, init });
+    return json(200, url.endsWith('/archive') ? archived : restored);
+  });
+  const id = 'id/with spaces?#%';
+  assert.deepEqual(await api.archiveHabit(session, id), archived);
+  assert.deepEqual(await api.restoreHabit({ ...session, access_token: 'refreshed-access' }, id), restored);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].url, 'https://api.example.test/habits/id%2Fwith%20spaces%3F%23%25/archive');
+  assert.equal(calls[1].url, 'https://api.example.test/habits/id%2Fwith%20spaces%3F%23%25/restore');
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer current-access-secret');
+  assert.equal(calls[1].init.headers.Authorization, 'Bearer refreshed-access');
+  for (const { init } of calls) {
+    assert.equal(init.method, 'POST');
+    assert.equal(Object.hasOwn(init, 'body'), false);
+    assert.equal(init.headers['Content-Type'], 'application/json');
+    assert.ok(init.signal instanceof AbortSignal);
+    assert.equal(init.signal.aborted, false);
+  }
+});
+
+test('lifecycle auth, ownership, profile, validation and server failures stay readable without retry', async () => {
+  for (const method of ['archiveHabit', 'restoreHabit']) {
+    for (const [status, detail, code, message] of [
+      [401, 'Invalid or expired Supabase access token', 'http_401', 'Invalid or expired Supabase access token'],
+      [404, { code: 'habit_not_found', message: 'Habit not found' }, 'habit_not_found', 'Habit not found'],
+      [404, { code: 'profile_not_found', message: 'Create a profile to complete onboarding' }, 'profile_not_found', 'Create a profile to complete onboarding'],
+      [422, [{ loc: ['path', 'habit_id'], input: session.access_token }], 'validation_error', 'Request validation failed. Check the submitted fields.'],
+      [503, null, 'http_503', 'API failed with HTTP 503'],
+    ]) {
+      let requests = 0;
+      const api = client(async () => { requests++; return json(status, { detail }); });
+      await assert.rejects(api[method](session, 'habit-id'), failure(api, status, code, message));
+      assert.equal(requests, 1);
+    }
+  }
+});
+
+test('lifecycle network and invalid-response failures never trigger automatic mutation retries', async () => {
+  for (const method of ['archiveHabit', 'restoreHabit']) {
+    for (const [respond, status, code, message] of [
+      [() => { throw new Error(`Lost connection ${session.access_token}`); }, null, 'network_error', 'Unable to reach the API. Check your connection.'],
+      [() => new Response('truncated response', { status: 200 }), 200, 'invalid_response', 'API returned an invalid JSON response'],
+    ]) {
+      let requests = 0;
+      const api = client(async () => { requests++; return respond(); });
+      await assert.rejects(api[method](session, 'habit-id'), failure(api, status, code, message));
+      assert.equal(requests, 1);
+    }
+  }
+});
+
+test('lifecycle timeouts warn of possible processing, ignore late successes and never retry', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const method of ['archiveHabit', 'restoreHabit']) {
+    let requests = 0;
+    let signal;
+    let finish;
+    const api = client((_url, init) => {
+      requests++;
+      signal = init.signal;
+      return new Promise(resolve => { finish = resolve; });
+    });
+    const pending = api[method](session, 'habit-id');
+    const timedOut = failure(api, null, 'request_timeout', 'API request timed out after 30 seconds. The server may have processed the request.');
+    const rejected = assert.rejects(pending, timedOut);
+    t.mock.timers.tick(30_000);
+    await rejected;
+    assert.equal(signal.aborted, true);
+    finish(json(200, { ...binaryCreate, id: 'habit-id', archived_at: method === 'archiveHabit' ? profile.created_at : null }));
+    await assert.rejects(pending, timedOut);
+    assert.equal(requests, 1);
+  }
 });
 
 test('structured conflicts preserve codes/messages and mutations are not retried', async () => {

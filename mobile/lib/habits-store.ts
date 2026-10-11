@@ -1,16 +1,25 @@
 import type { Session } from '@supabase/supabase-js';
-import { ApiError, type HabitResult } from './api';
+import { ApiError, type HabitResult, type HabitStatus } from './api';
 import type { SessionStore } from './session-store';
 
 type SessionSource = Pick<SessionStore, 'snapshot' | 'subscribe'>;
+export type HabitFilter = Exclude<HabitStatus, 'all'>;
 export type HabitsState = {
   habits: HabitResult[];
+  status: HabitFilter;
   hasLoaded: boolean;
   loading: boolean;
   refreshing: boolean;
   error: string | null;
+  restoreConfirmation: HabitResult | null;
+  restoringId: string | null;
+  restoreError: string | null;
+  restoreUncertain: boolean;
 };
-const emptyState = (): HabitsState => ({ habits: [], hasLoaded: false, loading: false, refreshing: false, error: null });
+const emptyState = (status: HabitFilter = 'active', restoringId: string | null = null): HabitsState => ({
+  habits: [], status, hasLoaded: false, loading: false, refreshing: false, error: null,
+  restoreConfirmation: null, restoringId, restoreError: null, restoreUncertain: false,
+});
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
@@ -21,19 +30,30 @@ function errorMessage(error: unknown): string {
   return 'Unable to load your habits. Please retry.';
 }
 
-/** Screen-scoped data; session changes invalidate reads before React renders again. */
+/** Screen-scoped data; account, filter, and navigation changes invalidate earlier work. */
 export class HabitsStore {
   private state = emptyState();
   private listeners = new Set<() => void>();
   private session: Session | null = null;
   private revision = 0;
+  private readRevision = 0;
   private active = false;
   private unsubscribe?: () => void;
+  // Keep the request guard through token refreshes and screen/filter changes until it settles.
+  private pendingRestores = new Map<string, { id: string; revision: number }>();
 
-  constructor(private sessions: SessionSource, private listHabits: (session: Session) => Promise<HabitResult[]>) {}
+  constructor(
+    private sessions: SessionSource,
+    private listHabits: (session: Session, status: HabitFilter) => Promise<HabitResult[]>,
+    private restoreHabit: (session: Session, id: string) => Promise<HabitResult>,
+  ) {}
   snapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private publish(state: HabitsState) { this.state = state; this.listeners.forEach(listener => listener()); }
+  private currentSession() {
+    const current = this.sessions.snapshot();
+    return this.active && current.status === 'ready' && current.session?.user.id === this.session?.user.id ? current.session : null;
+  }
 
   start() {
     if (this.active) return;
@@ -44,6 +64,7 @@ export class HabitsStore {
   stop() {
     this.active = false;
     this.revision++;
+    this.readRevision++;
     this.unsubscribe?.();
     this.session = null;
     this.publish(emptyState());
@@ -54,27 +75,96 @@ export class HabitsStore {
     if (session === this.session) return;
     const sameUser = !!session && session.user.id === this.session?.user.id;
     this.session = session;
-    this.revision++;
-    if (!sameUser) this.publish(emptyState());
+    this.readRevision++;
+    if (!sameUser) {
+      this.revision++;
+      this.publish(emptyState('active', session ? this.pendingRestores.get(session.user.id)?.id ?? null : null));
+    }
     if (session) void this.reload();
   };
 
+  setStatus = (status: HabitFilter) => {
+    if (!this.currentSession() || status === this.state.status) return;
+    this.revision++;
+    this.readRevision++;
+    this.publish(emptyState(status, this.state.restoringId));
+    void this.reload();
+  };
+
   reload = async () => {
-    const current = this.sessions.snapshot();
-    const session = current.session;
-    if (!this.active || current.status !== 'ready' || !session) return;
-    const revision = ++this.revision;
-    this.publish({ ...this.state, loading: !this.state.hasLoaded, refreshing: this.state.hasLoaded, error: null });
-    const isCurrent = () => this.active && revision === this.revision
-      && this.sessions.snapshot().status === 'ready' && this.sessions.snapshot().session === session;
+    const session = this.currentSession();
+    if (!session || this.pendingRestores.get(session.user.id)?.revision === this.revision) return;
+    const revision = ++this.readRevision;
+    const status = this.state.status;
+    this.publish({ ...this.state, loading: !this.state.hasLoaded, refreshing: this.state.hasLoaded, error: null, restoreConfirmation: null });
+    const isCurrent = () => this.active && revision === this.readRevision && this.currentSession() === session;
     try {
-      const habits = await this.listHabits(session);
+      const habits = await this.listHabits(session, status);
       if (!isCurrent()) return;
       if (habits.some(habit => habit.owner_id !== session.user.id)) throw new Error('Habit owner mismatch');
-      this.publish({ habits: habits.filter(habit => habit.archived_at === null), hasLoaded: true, loading: false, refreshing: false, error: null });
+      this.publish({ ...this.state,
+        habits: habits.filter(habit => status === 'active' ? habit.archived_at === null : habit.archived_at !== null),
+        hasLoaded: true, loading: false, refreshing: false, error: null,
+        restoreError: this.state.restoreUncertain ? null : this.state.restoreError, restoreUncertain: false,
+      });
     } catch (error) {
       if (!isCurrent()) return;
       this.publish({ ...this.state, loading: false, refreshing: false, error: errorMessage(error) });
     }
+  };
+
+  // UI refresh actions are single-flight; internal reloads may supersede stale reads.
+  refreshServerState = async () => {
+    if (this.state.loading || this.state.refreshing) return;
+    await this.reload();
+  };
+
+  requestRestore = (habit: HabitResult) => {
+    const session = this.currentSession();
+    if (!session || this.state.status !== 'archived' || !this.state.habits.includes(habit)
+      || habit.archived_at === null || this.state.loading || this.state.refreshing
+      || this.pendingRestores.has(session.user.id) || this.state.restoreUncertain) return;
+    this.publish({ ...this.state, restoreConfirmation: habit, restoreError: null });
+  };
+  cancelRestore = (habit: HabitResult) => {
+    if (this.state.restoreConfirmation !== habit) return;
+    this.publish({ ...this.state, restoreConfirmation: null });
+  };
+  confirmRestore = async (habit: HabitResult) => {
+    const session = this.currentSession();
+    if (!session || this.state.restoreConfirmation !== habit || this.state.status !== 'archived'
+      || this.state.loading || this.state.refreshing || this.state.restoreUncertain
+      || this.pendingRestores.has(session.user.id)) return;
+    const operation = { id: habit.id, revision: this.revision };
+    this.pendingRestores.set(session.user.id, operation);
+    this.publish({ ...this.state, restoreConfirmation: null, restoringId: habit.id, restoreError: null });
+    const isCurrent = () => this.revision === operation.revision && this.currentSession()?.user.id === session.user.id;
+    let restored = false;
+    try {
+      const result = await this.restoreHabit(session, habit.id);
+      if (!isCurrent()) return;
+      if (result.id !== habit.id || result.owner_id !== session.user.id || result.archived_at !== null) {
+        throw new ApiError('Unexpected restore response', 200, 'invalid_response');
+      }
+      restored = true;
+      // The confirmed result remains reflected even if the following list refresh fails.
+      this.publish({ ...this.state, habits: this.state.habits.filter(item => item.id !== habit.id) });
+    } catch (error) {
+      if (!isCurrent()) return;
+      const definite = error instanceof ApiError && (error.code === 'configuration_error'
+        || (error.status !== null && error.status >= 400 && error.status < 500 && error.status !== 408 && error.code !== 'request_timeout'));
+      const message = !definite
+        ? 'We could not confirm whether this habit was restored. It may have succeeded. Refresh current server state before deciding to restore again.'
+        : error instanceof ApiError && error.status === 401
+          ? 'Unable to verify your session. Return Home to sign out and sign in again, or retry restoring.'
+          : error instanceof ApiError && error.code === 'habit_not_found'
+            ? 'This habit is no longer available. Refresh your habits to check the current server state.'
+            : 'Unable to restore this habit. Please try again.';
+      this.publish({ ...this.state, restoreError: message, restoreUncertain: !definite });
+    } finally {
+      this.pendingRestores.delete(session.user.id);
+      if (this.currentSession()?.user.id === session.user.id) this.publish({ ...this.state, restoringId: null });
+    }
+    if (restored && isCurrent()) await this.reload();
   };
 }
