@@ -1,4 +1,5 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useState, useSyncExternalStore } from 'react';
+import { Link, useFocusEffect } from 'expo-router';
 import { ActivityIndicator, Button, FlatList, StyleSheet, Text, View } from 'react-native';
 import { styles } from '../components/form';
 import { listHabits } from '../lib/api';
@@ -10,7 +11,8 @@ export default function MyHabits() {
   const { store: sessions } = useSession();
   const [store] = useState(() => new HabitsStore(sessions, listHabits));
   const { habits, hasLoaded, loading, refreshing, error } = useSyncExternalStore(store.subscribe, store.snapshot);
-  useEffect(() => { store.start(); return () => store.stop(); }, [store]);
+  // Returning from creation (or checking an uncertain save) reads the current list.
+  useFocusEffect(useCallback(() => { store.start(); return () => store.stop(); }, [store]));
 
   return <FlatList
     style={localStyles.screen}
@@ -21,6 +23,7 @@ export default function MyHabits() {
     onRefresh={store.reload}
     ListHeaderComponent={<View style={localStyles.header}>
       <Text accessibilityRole="header" style={styles.title}>My habits</Text>
+      <Link href="/create-habit" style={styles.message}>Create habit</Link>
       <Text style={styles.message}>Your active habits. Pull down to refresh.</Text>
       {(loading || (!hasLoaded && !error)) && <ActivityIndicator accessibilityLabel="Loading habits" size="large" />}
       {error && <View style={localStyles.header}>

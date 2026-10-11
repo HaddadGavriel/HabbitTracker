@@ -70,7 +70,7 @@ No database password or Firebase private credential belongs in the mobile `.env`
 
    The CLI applies unapplied migrations in timestamp order, through `supabase/migrations/202610090001_friend_reminders.sql`. That migration follows merged PR #12's occurrence history/streak migration and must be applied before deploying the matching backend. It also makes device tokens globally unique, retaining the most recently updated registration when historical duplicates exist. If CLI access is unavailable, run each unapplied migration in filename order in **Supabase Dashboard → SQL Editor → New query → Run**; do not edit a migration that was already applied. Disposable PostgreSQL test setup is documented in [`docs/friendships.md`](docs/friendships.md). Implementation and tests do not apply shared database migrations or deploy the service.
 
-The mobile app now provides email/password authentication, profile onboarding, a minimal identity home, a read-only **My habits** screen for active habits, and infrastructure diagnostics. See the [Android authentication walkthrough](docs/mobile-auth-walkthrough.md) and [My habits walkthrough](docs/mobile-habits-walkthrough.md) for device validation and automated coverage.
+The mobile app now provides email/password authentication, profile onboarding, a minimal identity home, **My habits** with an active list and creation form, and infrastructure diagnostics. See the [Android authentication walkthrough](docs/mobile-auth-walkthrough.md), [My habits walkthrough](docs/mobile-habits-walkthrough.md), and [habit creation walkthrough](docs/mobile-create-habit-walkthrough.md) for device validation and automated coverage.
 
 ### Profile onboarding and API
 

@@ -86,13 +86,15 @@ export const createProfile = (session: Session, profile: ProfileCreate) =>
   request<ProfileResult>('/profiles/me', session, { method: 'POST', body: JSON.stringify(profile) });
 
 /** Weekdays use ISO numbering: Monday = 1, Sunday = 7; daily schedules return []. */
+export type HabitWeekday = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
 export type HabitResult = {
   id: string;
   owner_id: string;
   name: string;
   description: string | null;
   schedule: 'daily' | 'selected';
-  weekdays: (1 | 2 | 3 | 4 | 5 | 6 | 7)[];
+  weekdays: HabitWeekday[];
   reminder_times: string[];
   created_at: string;
   updated_at: string;
@@ -101,6 +103,21 @@ export type HabitResult = {
   | { type: 'binary'; target: null; unit: null }
   | { type: 'target'; target: number; unit: string | null }
 );
+
+/** Owner identity and timestamps are server-managed; binary payloads omit target/unit. */
+export type HabitCreate = {
+  name: string;
+  description?: string | null;
+  schedule: 'daily' | 'selected';
+  weekdays: HabitWeekday[];
+  reminder_times: string[];
+} & (
+  | { type: 'binary'; target?: never; unit?: never }
+  | { type: 'target'; target: number; unit?: string | null }
+);
+
+export const createHabit = (session: Session, habit: HabitCreate) =>
+  request<HabitResult>('/habits', session, { method: 'POST', body: JSON.stringify(habit) });
 
 /** Owner identity comes from the current session; the backend returns an array. */
 export const listHabits = (session: Session) =>
