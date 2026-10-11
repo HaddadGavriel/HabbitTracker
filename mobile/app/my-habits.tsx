@@ -1,6 +1,6 @@
 import { useCallback, useState, useSyncExternalStore } from 'react';
 import { Link, useFocusEffect } from 'expo-router';
-import { ActivityIndicator, Button, FlatList, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Button, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { styles } from '../components/form';
 import { listHabits } from '../lib/api';
 import { habitSchedule, habitType } from '../lib/habit-labels';
@@ -11,7 +11,7 @@ export default function MyHabits() {
   const { store: sessions } = useSession();
   const [store] = useState(() => new HabitsStore(sessions, listHabits));
   const { habits, hasLoaded, loading, refreshing, error } = useSyncExternalStore(store.subscribe, store.snapshot);
-  // Returning from creation (or checking an uncertain save) reads the current list.
+  // Returning from creation/editing (or checking an uncertain save) reads the current list.
   useFocusEffect(useCallback(() => { store.start(); return () => store.stop(); }, [store]));
 
   return <FlatList
@@ -33,11 +33,11 @@ export default function MyHabits() {
       </View>}
     </View>}
     ListEmptyComponent={hasLoaded && !error ? <Text style={styles.message}>No active habits yet.</Text> : null}
-    renderItem={({ item }) => <View style={localStyles.card}>
+    renderItem={({ item }) => <Link href={{ pathname: '/edit-habit', params: { id: item.id } }} asChild><Pressable style={localStyles.card} accessibilityRole="button" accessibilityLabel={`Edit ${item.name}`}>
       <Text accessibilityRole="header" style={styles.label}>{item.name}</Text>
       <Text style={styles.message}>{habitType(item)}</Text>
       <Text style={styles.message}>Schedule: {habitSchedule(item)}</Text>
-    </View>}
+    </Pressable></Link>}
   />;
 }
 
