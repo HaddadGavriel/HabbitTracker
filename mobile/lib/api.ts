@@ -88,21 +88,53 @@ export const createProfile = (session: Session, profile: ProfileCreate) =>
 /** Weekdays use ISO numbering: Monday = 1, Sunday = 7; daily schedules return []. */
 export type HabitWeekday = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
-export type HabitResult = {
-  id: string;
-  owner_id: string;
+/** Full server configuration, including nullable fields in occurrence snapshots. */
+export type HabitSnapshot = {
   name: string;
   description: string | null;
   schedule: 'daily' | 'selected';
   weekdays: HabitWeekday[];
   reminder_times: string[];
-  created_at: string;
-  updated_at: string;
-  archived_at: string | null;
 } & (
   | { type: 'binary'; target: null; unit: null }
   | { type: 'target'; target: number; unit: string | null }
 );
+
+export type HabitResult = HabitSnapshot & {
+  id: string;
+  owner_id: string;
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+};
+
+export type OccurrenceState = 'in_progress' | 'completed' | 'missed' | 'justification_pending' | 'excused';
+
+export type OccurrenceResult = {
+  id: string;
+  habit_id: string;
+  owner_id: string;
+  local_date: string;
+  timezone: string;
+  closes_at: string;
+  snapshot: HabitSnapshot;
+  progress: number;
+  completed: boolean;
+  state: OccurrenceState;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TodayResult = {
+  local_date: string;
+  timezone: string;
+  server_time: string;
+  occurrences: OccurrenceResult[];
+};
+
+/** The server determines the local date, due occurrences, snapshots, and states. */
+export const readToday = (session: Session) =>
+  request<TodayResult>('/today', session, { method: 'GET' });
 
 /** Owner identity and timestamps are server-managed; binary payloads omit target/unit. */
 export type HabitCreate = {
