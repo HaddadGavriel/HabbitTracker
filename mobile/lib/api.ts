@@ -136,6 +136,12 @@ export type TodayResult = {
 export const readToday = (session: Session) =>
   request<TodayResult>('/today', session, { method: 'GET' });
 
+/** Explicit binary assignment; eligibility and the occurrence deadline are server-enforced. */
+export const setOccurrenceCompletion = (session: Session, id: string, completed: boolean) =>
+  request<OccurrenceResult>(`/occurrences/${encodeURIComponent(id)}/completion`, session, {
+    method: 'PUT', body: JSON.stringify({ completed }),
+  });
+
 /** Owner identity and timestamps are server-managed; binary payloads omit target/unit. */
 export type HabitCreate = {
   name: string;

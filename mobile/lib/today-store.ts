@@ -1,15 +1,18 @@
 import type { Session } from '@supabase/supabase-js';
-import { ApiError, type TodayResult } from './api';
+import { ApiError, type OccurrenceResult, type TodayResult } from './api';
 import type { SessionStore } from './session-store';
 
+type CompletionState = { pending: boolean; error: string | null; refreshRequired: boolean };
+type Operation = CompletionState & { context: number; clearErrorOnRefresh?: boolean };
 type TodayState = {
   // Keep the server's date/timezone and occurrences together, including on failure.
   today: TodayResult | null;
   loading: boolean;
   refreshing: boolean;
   error: string | null;
+  completions: Record<string, CompletionState>;
 };
-const emptyState = (): TodayState => ({ today: null, loading: false, refreshing: false, error: null });
+const emptyState = (): TodayState => ({ today: null, loading: false, refreshing: false, error: null, completions: {} });
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
@@ -20,25 +23,81 @@ function errorMessage(error: unknown): string {
   return 'Unable to load Today. Please retry.';
 }
 
-/** Screen-scoped server snapshots; no client scheduling or state transitions. */
+function atLeastAsRecent(timestamp: string, previous: string): boolean {
+  const time = Date.parse(timestamp), priorTime = Date.parse(previous);
+  if (time !== priorTime) return time > priorTime;
+  // PostgreSQL timestamps have microseconds; Date.parse keeps only milliseconds.
+  const remainder = (value: string) => (value.match(/\.(\d+)(?:Z|[+-]\d{2}:\d{2})$/)?.[1] ?? '')
+    .padEnd(6, '0').slice(3, 6);
+  return remainder(timestamp) >= remainder(previous);
+}
+
+/** Screen-scoped server snapshots. The server owns states and all write eligibility. */
 export class TodayStore {
   private state = emptyState();
   private listeners = new Set<() => void>();
   private session: Session | null = null;
-  private revision = 0;
+  private context = 0;
+  private readRevision = 0;
   private active = false;
   private unsubscribe?: () => void;
+  // Read refreshes must not release a write guard. Retain guards across navigation
+  // and account changes until the request settles and a fresh read reconciles it.
+  private operations = new Map<string, Operation>();
+  private clock: { server: number; started: number } | null = null;
+  private deadlineTimer?: ReturnType<typeof setTimeout>;
 
   constructor(
     private sessions: Pick<SessionStore, 'snapshot' | 'subscribe'>,
     private readToday: (session: Session) => Promise<TodayResult>,
+    private writeCompletion: (session: Session, id: string, completed: boolean) => Promise<OccurrenceResult>,
+    private now: () => number = () => performance.now(),
   ) {}
   snapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
-  private publish(state: TodayState) { this.state = state; this.listeners.forEach(listener => listener()); }
+  private publish(state: TodayState) {
+    this.state = state;
+    this.scheduleDeadline();
+    this.listeners.forEach(listener => listener());
+  }
   private currentSession() {
     const current = this.sessions.snapshot();
     return this.active && current.status === 'ready' && current.session?.user.id === this.session?.user.id ? current.session : null;
+  }
+  private key(owner: string, id: string) { return `${owner}:${id}`; }
+  private completionStates(today = this.state.today): Record<string, CompletionState> {
+    const states: Record<string, CompletionState> = {};
+    for (const item of today?.occurrences ?? []) {
+      const operation = this.operations.get(this.key(item.owner_id, item.id));
+      if (operation && (operation.context === this.context || operation.pending || operation.refreshRequired)) {
+        states[item.id] = { pending: operation.pending, error: operation.error, refreshRequired: operation.refreshRequired };
+      }
+    }
+    return states;
+  }
+  private serverNow() {
+    // Monotonic elapsed time avoids the device's wall clock/timezone. Measuring
+    // from read dispatch is conservative about time spent in transit.
+    return this.clock ? this.clock.server + Math.max(0, this.now() - this.clock.started) : NaN;
+  }
+  completionAction = (item: OccurrenceResult): boolean | null => {
+    const today = this.state.today;
+    if (!this.currentSession() || !today?.occurrences.includes(item) || item.local_date !== today.local_date
+      || item.owner_id !== this.session?.user.id || item.snapshot.type !== 'binary'
+      || !(this.serverNow() < Date.parse(item.closes_at))) return null;
+    if (item.state === 'in_progress' && !item.completed) return true;
+    if (item.state === 'completed' && item.completed) return false;
+    return null;
+  };
+  private scheduleDeadline() {
+    clearTimeout(this.deadlineTimer);
+    this.deadlineTimer = undefined;
+    const deadlines = (this.state.today?.occurrences ?? [])
+      .filter(item => this.completionAction(item) !== null).map(item => Date.parse(item.closes_at));
+    if (!deadlines.length) return;
+    const delay = Math.min(2_147_483_647, Math.max(1, Math.min(...deadlines) - this.serverNow()));
+    // Only hide expired actions; never infer occurrence states locally.
+    this.deadlineTimer = setTimeout(() => this.publish({ ...this.state }), delay);
   }
 
   start() {
@@ -49,9 +108,11 @@ export class TodayStore {
   }
   stop() {
     this.active = false;
-    this.revision++;
+    this.context++;
+    this.readRevision++;
     this.unsubscribe?.();
     this.session = null;
+    this.clock = null;
     this.publish(emptyState());
   }
   private acceptSession = () => {
@@ -60,8 +121,12 @@ export class TodayStore {
     if (session === this.session) return;
     const sameUser = !!session && session.user.id === this.session?.user.id;
     this.session = session;
-    this.revision++;
-    if (!sameUser) this.publish(emptyState());
+    this.readRevision++;
+    if (!sameUser) {
+      this.context++;
+      this.clock = null;
+      this.publish(emptyState());
+    }
     if (session) void this.reload();
   };
 
@@ -69,14 +134,27 @@ export class TodayStore {
   reload = async () => {
     const session = this.currentSession();
     if (!session) return;
-    const revision = ++this.revision;
+    const revision = ++this.readRevision;
+    const started = this.now();
+    const operationsAtStart = new Map(this.operations);
     this.publish({ ...this.state, loading: !this.state.today, refreshing: !!this.state.today, error: null });
-    const isCurrent = () => this.active && revision === this.revision && this.currentSession() === session;
+    const isCurrent = () => this.active && revision === this.readRevision && this.currentSession() === session;
     try {
       const today = await this.readToday(session);
       if (!isCurrent()) return;
       if (today.occurrences.some(occurrence => occurrence.owner_id !== session.user.id)) throw new Error('Occurrence owner mismatch');
-      this.publish({ today, loading: false, refreshing: false, error: null });
+      if (this.state.today && (today.local_date !== this.state.today.local_date || today.timezone !== this.state.today.timezone)) this.context++;
+      this.clock = { server: Date.parse(today.server_time), started };
+      for (const item of today.occurrences) {
+        const key = this.key(session.user.id, item.id);
+        const operation = this.operations.get(key);
+        // A read dispatched before a write settled cannot resolve its uncertain outcome.
+        if (operation && !operation.pending && operationsAtStart.get(key) === operation) {
+          if (operation.clearErrorOnRefresh || operation.context !== this.context) this.operations.delete(key);
+          else this.operations.set(key, { ...operation, refreshRequired: false });
+        }
+      }
+      this.publish({ today, loading: false, refreshing: false, error: null, completions: this.completionStates(today) });
     } catch (error) {
       if (!isCurrent()) return;
       this.publish({ ...this.state, loading: false, refreshing: false, error: errorMessage(error) });
@@ -87,5 +165,66 @@ export class TodayStore {
   refresh = async () => {
     if (this.state.loading || this.state.refreshing) return;
     await this.reload();
+  };
+
+  setCompletion = async (item: OccurrenceResult, completed: boolean) => {
+    const session = this.currentSession();
+    if (!session || this.completionAction(item) !== completed) return;
+    const key = this.key(session.user.id, item.id);
+    const previous = this.operations.get(key);
+    if (previous?.pending || previous?.refreshRequired) return;
+    const operation: Operation = { context: this.context, pending: true, error: null, refreshRequired: false };
+    this.operations.set(key, operation);
+    this.publish({ ...this.state, completions: this.completionStates() });
+    const isCurrent = () => this.context === operation.context && this.currentSession()?.user.id === session.user.id
+      && this.state.today?.occurrences.some(row => row.id === item.id && row.local_date === item.local_date);
+    const ignoreStale = () => {
+      // Ignore old results. If the same row is visible again, release its spinner
+      // but require a read before another write; never apply the old occurrence.
+      this.operations.set(key, { ...operation, pending: false, refreshRequired: true, clearErrorOnRefresh: true,
+        error: 'A previous update finished. Refresh Today before another change.' });
+      if (this.currentSession()?.user.id === session.user.id && this.state.today?.occurrences.some(row => row.id === item.id)) {
+        this.publish({ ...this.state, completions: this.completionStates() });
+      }
+    };
+    let refresh = false;
+    try {
+      const result = await this.writeCompletion(session, item.id, completed);
+      if (!isCurrent()) { ignoreStale(); return; }
+      if (result?.id !== item.id || result.owner_id !== session.user.id || result.habit_id !== item.habit_id
+        || result.local_date !== item.local_date || result.timezone !== item.timezone || result.closes_at !== item.closes_at
+        || result.snapshot?.type !== 'binary' || result.completed !== completed
+        || result.state !== (completed ? 'completed' : 'in_progress') || !Number.isFinite(Date.parse(result.updated_at))) {
+        throw new ApiError('Unexpected completion response', 200, 'invalid_response');
+      }
+      // Invalidate reads dispatched before acknowledgement, including reads started
+      // during the write. The following refresh gets a new revision.
+      this.readRevision++;
+      this.operations.delete(key);
+      const today = this.state.today!;
+      this.publish({ ...this.state, today: { ...today, occurrences: today.occurrences.map(row =>
+        row.id === item.id && atLeastAsRecent(result.updated_at, row.updated_at) ? result : row) },
+        loading: false, refreshing: false, completions: this.completionStates() });
+      refresh = true;
+    } catch (error) {
+      if (!isCurrent()) { ignoreStale(); return; }
+      const definite = error instanceof ApiError && (error.code === 'configuration_error'
+        || (error.status !== null && error.status >= 400 && error.status < 500
+          && error.status !== 408 && error.code !== 'request_timeout' && error.code !== 'network_error'));
+      const code = error instanceof ApiError ? error.code : null;
+      refresh = definite && ['occurrence_closed', 'occurrence_locked', 'occurrence_not_found', 'wrong_occurrence_type'].includes(code ?? '');
+      const message = !definite
+        ? 'We could not confirm this change. It may have succeeded. Refresh Today before another action.'
+        : code === 'occurrence_closed' ? 'This occurrence is closed. Its deadline has passed. Refresh Today to see its current state.'
+        : code === 'occurrence_locked' ? 'This occurrence is locked by an excuse and cannot be changed. Refresh Today to see its current state.'
+        : code === 'occurrence_not_found' ? 'This occurrence is no longer available. Refresh Today to check its current state.'
+        : code === 'wrong_occurrence_type' ? 'This occurrence does not support completion. Refresh Today to check its current state.'
+        : error instanceof ApiError && error.status === 401
+          ? 'Unable to verify your session. Retry, or return Home to sign out and sign in again.'
+        : 'Unable to change this occurrence. Please try again.';
+      this.operations.set(key, { ...operation, pending: false, error: message, refreshRequired: !definite || refresh, clearErrorOnRefresh: !definite });
+      this.publish({ ...this.state, completions: this.completionStates() });
+    }
+    if (refresh && isCurrent()) await this.reload();
   };
 }

@@ -2,7 +2,7 @@ import { useCallback, useState, useSyncExternalStore } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { ActivityIndicator, AppState, Button, FlatList, StyleSheet, Text, View } from 'react-native';
 import { styles } from '../components/form';
-import { readToday, type OccurrenceResult } from '../lib/api';
+import { readToday, setOccurrenceCompletion, type OccurrenceResult } from '../lib/api';
 import { useSession } from '../lib/session';
 import { TodayStore } from '../lib/today-store';
 
@@ -16,8 +16,8 @@ const statusLabels: Record<OccurrenceResult['state'], string> = {
 
 export default function Today() {
   const { store: sessions } = useSession();
-  const [store] = useState(() => new TodayStore(sessions, readToday));
-  const { today, loading, refreshing, error } = useSyncExternalStore(store.subscribe, store.snapshot);
+  const [store] = useState(() => new TodayStore(sessions, readToday, setOccurrenceCompletion));
+  const { today, loading, refreshing, error, completions } = useSyncExternalStore(store.subscribe, store.snapshot);
   useFocusEffect(useCallback(() => {
     store.start();
     let previous = AppState.currentState;
@@ -50,14 +50,31 @@ export default function Today() {
       </View>}
     </View>}
     ListEmptyComponent={today && !error ? <Text style={styles.message}>No habits to show for this date.</Text> : null}
-    renderItem={({ item }) => <View style={localStyles.card}>
-      <Text accessibilityRole="header" style={styles.label}>{item.snapshot.name}</Text>
-      <Text style={styles.message}>{item.snapshot.type === 'binary' ? 'Binary' : 'Target'}</Text>
-      {item.snapshot.type === 'target' && <Text style={styles.message}>
-        Progress: {item.progress} / {item.snapshot.target}{item.snapshot.unit ? ` ${item.snapshot.unit}` : ''}
-      </Text>}
-      <Text style={styles.message}>Status: {statusLabels[item.state]}</Text>
-    </View>}
+    renderItem={({ item }) => {
+      const action = store.completionAction(item);
+      const completion = completions[item.id];
+      return <View style={localStyles.card}>
+        <Text accessibilityRole="header" style={styles.label}>{item.snapshot.name}</Text>
+        <Text style={styles.message}>{item.snapshot.type === 'binary' ? 'Binary' : 'Target'}</Text>
+        {item.snapshot.type === 'target' && <Text style={styles.message}>
+          Progress: {item.progress} / {item.snapshot.target}{item.snapshot.unit ? ` ${item.snapshot.unit}` : ''}
+        </Text>}
+        <Text style={styles.message}>Status: {statusLabels[item.state]}</Text>
+        {action !== null && <Button
+          title={action ? 'Complete' : 'Undo'}
+          accessibilityLabel={`${action ? 'Complete' : 'Undo'} ${item.snapshot.name}`}
+          onPress={() => store.setCompletion(item, action)}
+          disabled={completion?.pending || completion?.refreshRequired}
+        />}
+        {completion?.pending && <ActivityIndicator accessibilityLabel={`Updating ${item.snapshot.name}`} />}
+        {completion?.error && <Text accessibilityLiveRegion="polite" style={styles.message}>{completion.error}</Text>}
+        {completion?.refreshRequired && <Button
+          title="Refresh Today"
+          onPress={store.refresh}
+          disabled={loading || refreshing}
+        />}
+      </View>;
+    }}
   />;
 }
 

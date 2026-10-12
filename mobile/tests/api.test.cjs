@@ -143,6 +143,80 @@ test('Today timeout settles once, aborts the request, and cannot become a late s
   assert.equal(calls, 1);
 });
 
+test('binary complete and undo PUT explicit booleans to the encoded ID using current credentials', async () => {
+  const calls = [];
+  const api = client(async (url, init) => {
+    calls.push({ url, init });
+    const { completed } = JSON.parse(init.body);
+    return json(200, {
+      ...today.occurrences[0], completed, state: completed ? 'completed' : 'in_progress',
+      updated_at: '2026-10-10T23:31:00Z',
+    });
+  });
+  for (const completed of [true, false]) {
+    const currentSession = completed ? session : { ...session, access_token: 'refreshed-access' };
+    assert.deepEqual(await api.setOccurrenceCompletion(currentSession, 'id/with spaces?#%', completed), {
+      ...today.occurrences[0], completed, state: completed ? 'completed' : 'in_progress',
+      updated_at: '2026-10-10T23:31:00Z',
+    });
+    const { url, init } = calls.at(-1);
+    assert.equal(url, 'https://api.example.test/occurrences/id%2Fwith%20spaces%3F%23%25/completion');
+    assert.equal(init.method, 'PUT');
+    assert.deepEqual(JSON.parse(init.body), { completed });
+    assert.equal(init.headers['Content-Type'], 'application/json');
+    assert.equal(init.headers.Authorization, `Bearer ${currentSession.access_token}`);
+    assert.ok(init.signal instanceof AbortSignal);
+  }
+  assert.equal(calls.length, 2);
+});
+
+test('completion preserves closed, locked, ownership, authentication and validation errors without retry', async () => {
+  for (const [status, detail, code, message] of [
+    [409, { code: 'occurrence_closed', message: 'Occurrence is closed' }, 'occurrence_closed', 'Occurrence is closed'],
+    [409, { code: 'occurrence_locked', message: 'Occurrence is locked by an excuse submission' }, 'occurrence_locked', 'Occurrence is locked by an excuse submission'],
+    [409, { code: 'wrong_occurrence_type', message: 'Operation does not match occurrence type' }, 'wrong_occurrence_type', 'Operation does not match occurrence type'],
+    [404, { code: 'occurrence_not_found', message: 'Occurrence not found' }, 'occurrence_not_found', 'Occurrence not found'],
+    [401, 'Invalid or expired Supabase access token', 'http_401', 'Invalid or expired Supabase access token'],
+    [422, [{ loc: ['body', 'completed'], input: session.access_token }], 'validation_error', 'Request validation failed. Check the submitted fields.'],
+    [503, null, 'http_503', 'API failed with HTTP 503'],
+  ]) {
+    let requests = 0;
+    const api = client(async () => { requests++; return json(status, { detail }); });
+    await assert.rejects(api.setOccurrenceCompletion(session, 'occurrence-id', true), failure(api, status, code, message));
+    assert.equal(requests, 1);
+  }
+});
+
+test('completion never retries uncertain network or invalid-response outcomes', async () => {
+  for (const [respond, status, code, message] of [
+    [() => { throw new Error(`Lost connection ${session.access_token}`); }, null, 'network_error', 'Unable to reach the API. Check your connection.'],
+    [() => new Response('truncated response', { status: 200 }), 200, 'invalid_response', 'API returned an invalid JSON response'],
+  ]) {
+    let requests = 0;
+    const api = client(async () => { requests++; return respond(); });
+    await assert.rejects(api.setOccurrenceCompletion(session, 'occurrence-id', false), failure(api, status, code, message));
+    assert.equal(requests, 1);
+  }
+});
+
+test('completion timeout reports possible processing and ignores late success without retry', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let signal, finish, requests = 0;
+  const api = client((_url, init) => {
+    requests++; signal = init.signal;
+    return new Promise(resolve => { finish = resolve; });
+  });
+  const pending = api.setOccurrenceCompletion(session, 'occurrence-id', true);
+  const timedOut = failure(api, null, 'request_timeout', 'API request timed out after 30 seconds. The server may have processed the request.');
+  const rejected = assert.rejects(pending, timedOut);
+  t.mock.timers.tick(30_000);
+  await rejected;
+  assert.equal(signal.aborted, true);
+  finish(json(200, { ...today.occurrences[0], completed: true, state: 'completed' }));
+  await assert.rejects(pending, timedOut);
+  assert.equal(requests, 1);
+});
+
 test('habits GET requests active habits with the supplied current session and preserves the array contract', async () => {
   const binary = {
     id: '00000000-0000-0000-0000-000000000001', owner_id: '00000000-0000-0000-0000-000000000010',
