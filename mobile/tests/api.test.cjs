@@ -66,6 +66,83 @@ test('profile-not-found preserves onboarding code and status', async () => {
   await assert.rejects(api.readProfile(session), failure(api, 404, 'profile_not_found', message));
 });
 
+const today = {
+  local_date: '2026-10-11', timezone: 'Pacific/Kiritimati', server_time: '2026-10-10T23:30:00Z',
+  occurrences: ['in_progress', 'completed', 'missed', 'justification_pending', 'excused'].map((state, index) => ({
+    id: `00000000-0000-0000-0000-00000000000${index + 1}`,
+    habit_id: `00000000-0000-0000-0000-00000000001${index + 1}`,
+    owner_id: '00000000-0000-0000-0000-000000000020',
+    local_date: '2026-10-11', timezone: 'Pacific/Kiritimati', closes_at: '2026-10-11T10:00:00Z',
+    snapshot: {
+      name: `Saved habit ${index}`, description: null,
+      type: index < 2 ? 'binary' : 'target', target: index < 2 ? null : 10, unit: index === 2 ? 'pages' : null,
+      schedule: 'selected', weekdays: [7], reminder_times: ['08:00'],
+    },
+    progress: index < 2 ? 0 : 3, completed: state === 'completed', state,
+    created_at: '2026-10-10T10:00:00Z', updated_at: '2026-10-10T23:20:00Z',
+  })),
+};
+
+test('Today GET uses the current session without date filters and preserves server snapshots and all states', async () => {
+  const body = { ...today, occurrences: [...today.occurrences, {
+    ...today.occurrences[2], id: '00000000-0000-0000-0000-000000000006',
+    habit_id: '00000000-0000-0000-0000-000000000016',
+    // Timezone snapshots may differ from the current profile timezone; progress is not capped.
+    timezone: 'UTC', closes_at: '2026-10-12T00:00:00Z', progress: 12, completed: true, state: 'completed',
+  }] };
+  const calls = [];
+  const api = client(async (url, init) => { calls.push({ url, init }); return json(200, body); });
+  assert.deepEqual(await api.readToday(session), body);
+  assert.deepEqual(await api.readToday({ ...session, access_token: 'refreshed-access' }), body);
+  assert.equal(calls.length, 2);
+  for (const { url, init } of calls) {
+    assert.equal(url, 'https://api.example.test/today');
+    assert.equal(init.method, 'GET');
+    assert.equal(init.body, undefined);
+    assert.ok(init.signal instanceof AbortSignal);
+  }
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer current-access-secret');
+  assert.equal(calls[1].init.headers.Authorization, 'Bearer refreshed-access');
+});
+
+test('empty Today retains the server date, timezone, and timestamp', async () => {
+  const body = { ...today, occurrences: [] };
+  const api = client(async () => json(200, body));
+  assert.deepEqual(await api.readToday(session), body);
+});
+
+test('Today auth, onboarding, server, network, and invalid JSON failures remain typed errors', async () => {
+  for (const [respond, status, code, message] of [
+    [() => json(401, { detail: 'Invalid or expired Supabase access token' }), 401, 'http_401', 'Invalid or expired Supabase access token'],
+    [() => json(404, { detail: { code: 'profile_not_found', message: 'Create a profile to complete onboarding' } }), 404, 'profile_not_found', 'Create a profile to complete onboarding'],
+    [() => json(503, { detail: null }), 503, 'http_503', 'API failed with HTTP 503'],
+    [() => { throw new Error(`fetch failed ${session.access_token}`); }, null, 'network_error', 'Unable to reach the API. Check your connection.'],
+    [() => new Response('not JSON'), 200, 'invalid_response', 'API returned an invalid JSON response'],
+  ]) {
+    let calls = 0;
+    const api = client(async () => { calls++; return respond(); });
+    await assert.rejects(api.readToday(session), failure(api, status, code, message));
+    assert.equal(calls, 1);
+  }
+});
+
+test('Today timeout settles once, aborts the request, and cannot become a late success', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let signal, finish, calls = 0;
+  const api = client((_url, init) => {
+    calls++; signal = init.signal;
+    return new Promise(resolve => { finish = resolve; });
+  });
+  const pending = api.readToday(session);
+  const rejected = assert.rejects(pending, failure(api, null, 'request_timeout', 'API request timed out after 30 seconds. The server may have processed the request.'));
+  t.mock.timers.tick(30_000);
+  await rejected;
+  assert.equal(signal.aborted, true);
+  finish(json(200, today));
+  await assert.rejects(pending, error => error.code === 'request_timeout');
+  assert.equal(calls, 1);
+});
+
 test('habits GET requests active habits with the supplied current session and preserves the array contract', async () => {
   const binary = {
     id: '00000000-0000-0000-0000-000000000001', owner_id: '00000000-0000-0000-0000-000000000010',
