@@ -6,16 +6,15 @@ const ts = require('typescript');
 
 // Real screens/stores with mocked host elements, Auth, API and app lifecycle.
 // No native runtime or network is available here.
-function compile(path, modules) {
+function compile(path, modules, globals = {}) {
   const exports = {};
   vm.runInNewContext(ts.transpileModule(readFileSync(`${__dirname}/../${path}`, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
-  }).outputText, { exports, process: { env: {} }, require: modules });
+  }).outputText, { exports, process: { env: {} }, require: modules, ...globals });
   return exports;
 }
 const cache = {};
 const lib = name => cache[name] ??= compile(`lib/${name}.ts`, path => lib(path.slice(2)));
-const { TodayStore } = lib('today-store');
 const { SessionStore, routeAccess } = lib('session-store');
 const { ApiError } = lib('api');
 const session = (id = 'a') => ({ user: { id }, access_token: `${id}-token` });
@@ -31,6 +30,31 @@ const today = (changes = {}) => ({
   local_date: '2026-10-10', timezone: 'America/Los_Angeles', server_time: '2026-10-11T05:00:00Z',
   occurrences: [occurrence()], ...changes,
 });
+const openToday = (changes = {}) => today({ server_time: '2026-10-10T12:00:00Z', ...changes });
+const completedOccurrence = (changes = {}) => occurrence({ completed: true, state: 'completed', updated_at: '2026-10-10T12:01:00Z', ...changes });
+function clock() {
+  let elapsed = 0, nextId = 0;
+  const timers = new Map();
+  return {
+    globals: {
+      performance: { now: () => elapsed },
+      setTimeout: (callback, delay) => { const id = ++nextId; timers.set(id, { callback, due: elapsed + delay }); return id; },
+      clearTimeout: id => timers.delete(id),
+    },
+    advance: duration => {
+      const end = elapsed + duration;
+      for (;;) {
+        const next = [...timers].filter(([, timer]) => timer.due <= end).sort((a, b) => a[1].due - b[1].due)[0];
+        if (!next) break;
+        elapsed = next[1].due;
+        timers.delete(next[0]);
+        next[1].callback();
+      }
+      elapsed = end;
+    },
+    timerCount: () => timers.size,
+  };
+}
 const flush = () => new Promise(resolve => setImmediate(resolve));
 function deferred() {
   let resolve, reject;
@@ -52,8 +76,10 @@ function text(tree) {
   if (typeof tree === 'string' || typeof tree === 'number') return String(tree);
   return tree && typeof tree === 'object' ? text(tree.props.children) : '';
 }
-async function screen(readToday, readProfile = async s => profile(s.user.id), initial = session()) {
+async function screen(readToday, readProfile = async s => profile(s.user.id), initial = session(), setOccurrenceCompletion = async () => assert.fail('Unexpected completion request')) {
   let authEvent, store, focus, cleanup;
+  const timer = clock();
+  const { TodayStore } = compile('lib/today-store.ts', path => lib(path.slice(2)), timer.globals);
   const appListeners = new Set();
   const auth = {
     getSession: async () => ({ data: { session: initial } }),
@@ -77,20 +103,25 @@ async function screen(readToday, readProfile = async s => profile(s.user.id), in
     'react-native': { AppState, ActivityIndicator: 'ActivityIndicator', Button: 'Button', FlatList: 'FlatList',
       Text: 'Text', View: 'View', StyleSheet: { create: value => value } },
     '../components/form': { styles: {} },
-    '../lib/api': { readToday },
+    '../lib/api': { readToday, setOccurrenceCompletion },
     '../lib/today-store': { TodayStore },
     '../lib/session': { useSession: () => ({ store: sessions }) },
   };
   const exports = compile('app/today.tsx', name => { assert.ok(modules[name], `Unexpected module ${name}`); return modules[name]; });
   const render = () => nodes(exports.default());
+  const list = () => render().find(node => node.type === 'FlatList').props;
+  const row = id => {
+    const item = list().data.find(item => item.id === id);
+    return item ? nodes(list().renderItem({ item })) : [];
+  };
   render();
   cleanup = focus();
   await flush();
   return {
-    render, sessions, auth, store: () => store,
+    render, sessions, auth, store: () => store, row, advance: timer.advance, timerCount: timer.timerCount,
     texts: () => render().filter(node => node.type === 'Text').map(text),
-    list: () => render().find(node => node.type === 'FlatList').props,
-    button: title => render().find(node => node.type === 'Button' && node.props.title === title),
+    list,
+    button: (title, id) => (id ? row(id) : render()).find(node => node.type === 'Button' && node.props.title === title),
     event: value => authEvent('SIGNED_IN', value),
     leave: () => cleanup(),
     focus: () => { cleanup = focus(); },
@@ -361,6 +392,530 @@ test('owner mismatch becomes an error without displaying another account data', 
   assert.equal(ui.store().snapshot().today, null);
   assert.ok(ui.button('Retry loading'));
   assert.ok(!ui.texts().includes('Original name'));
+});
+
+test('Complete and Undo controls send explicit values and render confirmed results before refreshing', async () => {
+  const complete = deferred(), undo = deferred(), completedRead = deferred(), undoneRead = deferred();
+  const writes = [];
+  let reads = 0;
+  const original = openToday();
+  const ui = await screen(() => [Promise.resolve(original), completedRead.promise, undoneRead.promise][reads++], undefined, undefined,
+    (s, id, completed) => { writes.push({ s, id, completed }); return completed ? complete.promise : undo.promise; });
+  const completeButton = ui.button('Complete').props;
+  assert.equal(completeButton.accessibilityLabel, 'Complete Original name');
+  const pending = completeButton.onPress();
+  await completeButton.onPress();
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].s.access_token, 'a-token');
+  assert.equal(writes[0].id, 'occurrence-a');
+  assert.equal(writes[0].completed, true);
+  assert.equal(ui.button('Complete').props.disabled, true);
+  assert.ok(ui.render().some(node => node.type === 'ActivityIndicator' && node.props.accessibilityLabel === 'Updating Original name'));
+  assert.ok(ui.texts().includes('Status: In progress'));
+  const confirmed = completedOccurrence();
+  complete.resolve(confirmed);
+  await flush();
+  assert.equal(ui.list().data[0], confirmed);
+  assert.ok(ui.texts().includes('Status: Completed'));
+  assert.ok(ui.button('Undo'));
+  assert.ok(ui.texts().includes('Date: 2026-10-10'));
+  assert.ok(ui.texts().includes('Timezone: America/Los_Angeles'));
+  assert.equal(ui.store().snapshot().today.server_time, original.server_time);
+  assert.equal(reads, 2);
+  completedRead.resolve(openToday({ occurrences: [confirmed], server_time: '2026-10-10T12:01:00Z' }));
+  await pending;
+  await flush();
+  assert.ok(!ui.render().some(node => node.type === 'ActivityIndicator'));
+  const undoPending = ui.button('Undo').props.onPress();
+  assert.equal(writes.length, 2);
+  assert.equal(writes[1].completed, false);
+  const undone = occurrence({ updated_at: '2026-10-10T12:02:00Z' });
+  undo.resolve(undone);
+  await flush();
+  assert.equal(ui.list().data[0], undone);
+  assert.ok(ui.texts().includes('Status: In progress'));
+  assert.ok(ui.button('Complete'));
+  assert.equal(reads, 3);
+  undoneRead.resolve(openToday({ occurrences: [undone] }));
+  await undoPending;
+});
+
+test('eligibility uses original deadline and server time, leaving targets and locked states read-only', async () => {
+  const rows = [
+    occurrence({ id: 'open' }),
+    completedOccurrence({ id: 'done' }),
+    occurrence({ id: 'target', snapshot: { ...occurrence().snapshot, type: 'target', target: 5, unit: 'pages' } }),
+    completedOccurrence({ id: 'target-done', snapshot: { ...occurrence().snapshot, type: 'target', target: 5, unit: null } }),
+    ...['missed', 'excused', 'justification_pending'].map(state => occurrence({ id: state, state })),
+    occurrence({ id: 'closed', closes_at: '2026-10-10T11:59:59Z' }),
+    completedOccurrence({ id: 'closed-done', closes_at: '2026-10-10T12:00:00Z' }),
+    occurrence({ id: 'invalid-deadline', closes_at: 'invalid' }),
+  ];
+  const ui = await screen(async () => openToday({ occurrences: rows }));
+  assert.ok(ui.button('Complete', 'open'));
+  assert.ok(ui.button('Undo', 'done'));
+  // The device is not set to this fixture date; the current profile and original occurrence timezone also differ.
+  assert.equal(ui.store().snapshot().today.timezone, 'America/Los_Angeles');
+  assert.equal(rows[0].timezone, 'Asia/Tokyo');
+  for (const item of rows.slice(2)) {
+    assert.ok(!ui.row(item.id).some(node => node.type === 'Button'), `${item.id} must be read-only`);
+    await ui.store().setCompletion(item, item.state !== 'completed');
+  }
+  assert.equal(ui.render().filter(node => node.type === 'Button').length, 2);
+});
+
+test('deadline timer hides actions at the exact server deadline and rejects an already captured control', async () => {
+  const ui = await screen(async () => openToday({ server_time: '2026-10-10T14:59:59Z' }));
+  let changes = 0;
+  ui.store().subscribe(() => changes++);
+  const press = ui.button('Complete').props.onPress;
+  ui.advance(999);
+  assert.ok(ui.button('Complete'));
+  ui.advance(1);
+  assert.ok(changes > 0, 'deadline must notify the real screen subscription');
+  assert.equal(ui.button('Complete'), undefined);
+  await press();
+  ui.leave();
+  assert.equal(ui.timerCount(), 0);
+});
+
+test('invalid server time cannot enable a mutation', async () => {
+  const ui = await screen(async () => openToday({ server_time: 'invalid' }));
+  assert.equal(ui.button('Complete'), undefined);
+  await ui.store().setCompletion(ui.list().data[0], true);
+});
+
+test('pending state is per occurrence and repeated captured taps do not duplicate requests', async () => {
+  const first = deferred(), second = deferred();
+  const calls = [];
+  const rows = [occurrence(), occurrence({ id: 'occurrence-b', habit_id: 'habit-b', snapshot: { ...occurrence().snapshot, name: 'Second habit' } })];
+  const ui = await screen(async () => openToday({ occurrences: rows }), undefined, undefined,
+    (_s, id) => { calls.push(id); return id === 'occurrence-a' ? first.promise : second.promise; });
+  const firstPress = ui.button('Complete', 'occurrence-a').props.onPress;
+  const pending = firstPress();
+  await firstPress();
+  assert.equal(ui.button('Complete', 'occurrence-a').props.disabled, true);
+  assert.ok(!ui.button('Complete', 'occurrence-b').props.disabled);
+  assert.equal(ui.row('occurrence-b').filter(node => node.type === 'ActivityIndicator').length, 0);
+  const next = ui.button('Complete', 'occurrence-b').props.onPress();
+  assert.deepEqual(calls, ['occurrence-a', 'occurrence-b']);
+  first.reject(new ApiError('bad input', 422, 'validation_error'));
+  second.reject(new ApiError('bad input', 422, 'validation_error'));
+  await Promise.all([pending, next]);
+  assert.ok(!ui.button('Complete', 'occurrence-a').props.disabled);
+  assert.ok(!ui.button('Complete', 'occurrence-b').props.disabled);
+});
+
+for (const [failure, expected] of [
+  [new ApiError('private auth detail', 401, 'http_401'), /session|sign in/i],
+  [new ApiError('private validation detail', 422, 'validation_error'), /unable|try|failed/i],
+]) test(`definite ${failure.code} is a safe row error and allows an explicit retry`, async () => {
+  let writes = 0, reads = 0;
+  const retry = deferred();
+  const ui = await screen(async () => { reads++; return openToday(); }, undefined, undefined,
+    () => { if (++writes === 1) return Promise.reject(failure); return retry.promise; });
+  await ui.button('Complete').props.onPress();
+  assert.equal(writes, 1);
+  assert.equal(reads, 1);
+  assert.ok(ui.texts().includes('Status: In progress'));
+  assert.equal(ui.store().snapshot().error, null);
+  const rowText = ui.row('occurrence-a').filter(node => node.type === 'Text').map(text).join(' ');
+  assert.match(rowText, expected);
+  assert.doesNotMatch(rowText, /private/);
+  assert.ok(!ui.button('Complete').props.disabled);
+  assert.equal(ui.button('Refresh Today'), undefined);
+  const pending = ui.button('Complete').props.onPress();
+  assert.equal(writes, 2);
+  assert.equal(ui.store().snapshot().completions['occurrence-a'].error, null);
+  retry.reject(failure);
+  await pending;
+});
+
+for (const [code, nextState, expected] of [
+  ['occurrence_closed', 'missed', /closed|deadline/i],
+  ['occurrence_locked', 'justification_pending', /locked|excuse/i],
+]) test(`${code} explains the rejection and refreshes the server state`, async () => {
+  const refresh = deferred();
+  let reads = 0, writes = 0;
+  const ui = await screen(() => ++reads === 1 ? Promise.resolve(openToday()) : refresh.promise, undefined, undefined,
+    async () => { writes++; throw new ApiError('private domain detail', 409, code); });
+  const pending = ui.button('Complete').props.onPress();
+  await flush();
+  assert.equal(writes, 1);
+  assert.equal(reads, 2);
+  assert.match(ui.texts().join(' '), expected);
+  assert.doesNotMatch(ui.texts().join(' '), /private/);
+  assert.equal(ui.button('Complete').props.disabled, true);
+  assert.equal(ui.button('Refresh Today').props.disabled, true);
+  refresh.resolve(openToday({ occurrences: [occurrence({ state: nextState })] }));
+  await pending;
+  await flush();
+  assert.equal(ui.button('Complete'), undefined);
+  assert.equal(ui.button('Undo'), undefined);
+  assert.equal(ui.list().data[0].state, nextState);
+});
+
+for (const failure of [
+  new ApiError('private timeout', null, 'request_timeout'),
+  new ApiError('private connection', null, 'network_error'),
+  new ApiError('private upstream', 503, 'http_503'),
+  new ApiError('private invalid response', 200, 'invalid_response'),
+  new Error('private unknown error'),
+]) test(`uncertain ${failure.code ?? 'unknown'} requires a successful Refresh Today before another action`, async () => {
+  let reads = 0, writes = 0;
+  const retryRead = deferred();
+  const ui = await screen(() => {
+    reads++;
+    if (reads === 1) return Promise.resolve(openToday());
+    if (reads === 2) return Promise.reject(new ApiError('offline', null, 'network_error'));
+    return retryRead.promise;
+  }, undefined, undefined, async () => { writes++; throw failure; });
+  const captured = ui.button('Complete').props.onPress;
+  await captured();
+  assert.equal(writes, 1);
+  assert.equal(reads, 1, 'uncertain outcomes offer a refresh without retrying the write');
+  assert.match(ui.texts().join(' '), /refresh/i);
+  assert.doesNotMatch(ui.texts().join(' '), /private/);
+  assert.equal(ui.button('Complete').props.disabled, true);
+  await captured();
+  assert.equal(writes, 1);
+  await ui.button('Refresh Today').props.onPress();
+  assert.equal(reads, 2);
+  assert.equal(ui.button('Complete').props.disabled, true);
+  assert.ok(ui.button('Refresh Today'));
+  await captured();
+  assert.equal(writes, 1);
+  const refreshed = ui.button('Refresh Today').props.onPress();
+  assert.equal(ui.button('Refresh Today').props.disabled, true);
+  retryRead.resolve(openToday({ occurrences: [completedOccurrence()] }));
+  await refreshed;
+  assert.equal(ui.button('Complete'), undefined);
+  assert.ok(!ui.button('Undo').props.disabled);
+  assert.equal(ui.button('Refresh Today'), undefined);
+  assert.equal(writes, 1);
+});
+
+test('a read started before an uncertain mutation outcome cannot clear the refresh requirement', async () => {
+  const mutation = deferred(), oldRead = deferred();
+  let reads = 0, writes = 0;
+  const ui = await screen(() => ++reads === 1 ? Promise.resolve(openToday()) : oldRead.promise, undefined, undefined,
+    () => { writes++; return mutation.promise; });
+  const pending = ui.button('Complete').props.onPress();
+  const refresh = ui.list().onRefresh();
+  mutation.reject(new ApiError('timed out', null, 'request_timeout'));
+  await pending;
+  oldRead.resolve(openToday());
+  await refresh;
+  assert.equal(ui.button('Complete').props.disabled, true);
+  assert.ok(ui.button('Refresh Today'));
+  await ui.button('Complete').props.onPress();
+  assert.equal(writes, 1);
+});
+
+for (const completed of [true, false]) for (const outcome of ['success', 'failure']) test(`confirmed ${completed ? 'completion' : 'undo'} survives an older refresh ${outcome}`, async () => {
+  const mutation = deferred(), oldRead = deferred(), latestRead = deferred();
+  let reads = 0;
+  const initial = openToday({ occurrences: [completed ? occurrence() : completedOccurrence()] });
+  const ui = await screen(() => [Promise.resolve(initial), oldRead.promise, latestRead.promise][reads++], undefined, undefined,
+    () => mutation.promise);
+  const refreshing = ui.list().onRefresh();
+  const pending = ui.button(completed ? 'Complete' : 'Undo').props.onPress();
+  const confirmed = completed ? completedOccurrence() : occurrence({ updated_at: '2026-10-10T12:02:00Z' });
+  mutation.resolve(confirmed);
+  await flush();
+  assert.equal(reads, 3, 'confirmed change starts a new authoritative refresh');
+  assert.equal(ui.list().data[0], confirmed);
+  const accepted = ui.store().snapshot();
+  if (outcome === 'success') oldRead.resolve(initial);
+  else oldRead.reject(new Error('older refresh failure'));
+  await refreshing;
+  assert.equal(ui.store().snapshot(), accepted);
+  latestRead.resolve(openToday({ occurrences: [confirmed] }));
+  await pending;
+  await flush();
+  assert.ok(ui.button(completed ? 'Undo' : 'Complete'));
+  assert.equal(ui.store().snapshot().error, null);
+});
+
+test('failed post-completion refresh preserves the confirmed row and original envelope for retry', async () => {
+  let reads = 0;
+  const confirmed = completedOccurrence();
+  const ui = await screen(async () => {
+    if (++reads === 2) throw new ApiError('offline', null, 'network_error');
+    return openToday({ occurrences: reads === 1 ? [occurrence()] : [confirmed] });
+  }, undefined, undefined, async () => confirmed);
+  await ui.button('Complete').props.onPress();
+  await flush();
+  assert.equal(ui.list().data[0], confirmed);
+  assert.ok(ui.texts().includes('Date: 2026-10-10'));
+  assert.ok(ui.texts().includes('Timezone: America/Los_Angeles'));
+  assert.ok(ui.texts().includes('Showing the last loaded date and habits.'));
+  await ui.button('Retry loading').props.onPress();
+  assert.equal(reads, 3);
+  assert.equal(ui.store().snapshot().error, null);
+  assert.ok(ui.button('Undo'));
+});
+
+test('a same-day refresh during a pending completion keeps its row busy and accepts the confirmed result', async () => {
+  const mutation = deferred();
+  let reads = 0, writes = 0;
+  const confirmed = completedOccurrence();
+  const ui = await screen(async () => {
+    reads++;
+    return openToday({ occurrences: [reads > 2 ? confirmed : occurrence()] });
+  }, undefined, undefined, () => { writes++; return mutation.promise; });
+  const pending = ui.button('Complete').props.onPress();
+  await ui.list().onRefresh();
+  assert.equal(ui.button('Complete').props.disabled, true);
+  await ui.button('Complete').props.onPress();
+  assert.equal(writes, 1);
+  mutation.resolve(confirmed);
+  await pending;
+  await flush();
+  assert.equal(reads, 3);
+  assert.equal(ui.list().data[0], confirmed);
+  assert.ok(ui.button('Undo'));
+});
+
+for (const acknowledgementIsNewer of [false, true]) test(`microsecond timestamps ${acknowledgementIsNewer ? 'allow a newer completion to replace an accepted read' : 'keep a newer accepted read over a late completion'}`, async () => {
+  const mutation = deferred(), nextRead = deferred(), followupRead = deferred();
+  let reads = 0;
+  const refreshedRow = occurrence({ updated_at: `2026-10-10T12:01:00.${acknowledgementIsNewer ? '123100' : '123900'}Z` });
+  const confirmed = completedOccurrence({ updated_at: `2026-10-10T12:01:00.${acknowledgementIsNewer ? '123900' : '123100'}Z` });
+  assert.equal(Date.parse(refreshedRow.updated_at), Date.parse(confirmed.updated_at), 'fixture differences are below JavaScript millisecond precision');
+  const ui = await screen(() => [Promise.resolve(openToday()), nextRead.promise, followupRead.promise][reads++],
+    undefined, undefined, () => mutation.promise);
+  const pending = ui.button('Complete').props.onPress();
+  const refresh = ui.list().onRefresh();
+  nextRead.resolve(openToday({ server_time: '2026-10-10T12:01:01Z', occurrences: [refreshedRow] }));
+  await refresh;
+  assert.equal(ui.list().data[0], refreshedRow);
+  assert.equal(ui.button('Complete').props.disabled, true);
+  mutation.resolve(confirmed);
+  await flush();
+  const expected = acknowledgementIsNewer ? confirmed : refreshedRow;
+  assert.equal(reads, 3);
+  assert.equal(ui.list().refreshing, true);
+  assert.equal(ui.list().data[0], expected);
+  assert.ok(ui.texts().includes(`Status: ${acknowledgementIsNewer ? 'Completed' : 'In progress'}`));
+  assert.ok(ui.button(acknowledgementIsNewer ? 'Undo' : 'Complete'));
+  assert.equal(ui.store().snapshot().today.server_time, '2026-10-10T12:01:01Z');
+  followupRead.resolve(openToday({ occurrences: [expected] }));
+  await pending;
+});
+
+test('token renewal keeps a pending completion guarded and uses renewed credentials for its refresh and next action', async () => {
+  const mutation = deferred(), secondMutation = deferred();
+  const readSessions = [], writeSessions = [];
+  const confirmed = completedOccurrence();
+  const ui = await screen(async s => {
+    readSessions.push(s);
+    return openToday({ occurrences: [readSessions.length > 2 ? confirmed : occurrence()] });
+  }, undefined, undefined, (s, _id, completed) => {
+    writeSessions.push(s);
+    return completed ? mutation.promise : secondMutation.promise;
+  });
+  const pending = ui.button('Complete').props.onPress();
+  const renewed = { ...session(), access_token: 'renewed-token' };
+  ui.event(renewed);
+  await flush();
+  assert.equal(readSessions[1], renewed);
+  assert.equal(ui.button('Complete').props.disabled, true);
+  await ui.button('Complete').props.onPress();
+  assert.equal(writeSessions.length, 1);
+  assert.equal(writeSessions[0].access_token, 'a-token');
+  mutation.resolve(confirmed);
+  await pending;
+  assert.equal(readSessions.length, 3);
+  assert.equal(readSessions[2], renewed);
+  const undo = ui.button('Undo').props.onPress();
+  assert.equal(writeSessions[1], renewed);
+  secondMutation.reject(new ApiError('validation', 422, 'validation_error'));
+  await undo;
+});
+
+test('two concurrent row completions preserve both confirmations across interleaved refreshes', async () => {
+  const first = deferred(), second = deferred(), oldRead = deferred(), latestRead = deferred();
+  let reads = 0;
+  const rows = [occurrence(), occurrence({ id: 'occurrence-b', habit_id: 'habit-b' })];
+  const completed = [completedOccurrence(), completedOccurrence({ id: 'occurrence-b', habit_id: 'habit-b' })];
+  const ui = await screen(() => [Promise.resolve(openToday({ occurrences: rows })), oldRead.promise, latestRead.promise][reads++],
+    undefined, undefined, (_s, id) => id === 'occurrence-a' ? first.promise : second.promise);
+  const firstPending = ui.button('Complete', 'occurrence-a').props.onPress();
+  const secondPending = ui.button('Complete', 'occurrence-b').props.onPress();
+  first.resolve(completed[0]);
+  await flush();
+  assert.equal(reads, 2);
+  assert.ok(ui.button('Undo', 'occurrence-a'));
+  assert.equal(ui.button('Complete', 'occurrence-b').props.disabled, true);
+  second.resolve(completed[1]);
+  await flush();
+  assert.equal(reads, 3);
+  assert.ok(ui.button('Undo', 'occurrence-a'));
+  assert.ok(ui.button('Undo', 'occurrence-b'));
+  const accepted = ui.store().snapshot();
+  oldRead.resolve(openToday({ occurrences: [completed[0], rows[1]] }));
+  await firstPending;
+  assert.equal(ui.store().snapshot(), accepted);
+  latestRead.resolve(openToday({ occurrences: completed }));
+  await secondPending;
+  assert.ok(ui.button('Undo', 'occurrence-a'));
+  assert.ok(ui.button('Undo', 'occurrence-b'));
+  assert.ok(!ui.render().some(node => node.type === 'ActivityIndicator'));
+});
+
+test('mismatched successful responses never replace the row and require refresh before another action', async () => {
+  for (const changes of [
+    { id: 'another-row' }, { owner_id: 'b' }, { habit_id: 'another-habit' }, { local_date: '2026-10-11' },
+    { timezone: 'UTC' }, { closes_at: '2026-10-12T00:00:00Z' }, { completed: false },
+    { state: 'excused' }, { snapshot: { ...occurrence().snapshot, type: 'target', target: 10 } },
+    { updated_at: 'invalid' },
+  ]) {
+    let writes = 0, reads = 0;
+    const initial = openToday();
+    const ui = await screen(async () => { reads++; return initial; }, undefined, undefined,
+      async () => { writes++; return completedOccurrence(changes); });
+    await ui.button('Complete').props.onPress();
+    assert.equal(ui.list().data, initial.occurrences, JSON.stringify(changes));
+    assert.equal(ui.button('Complete').props.disabled, true);
+    assert.ok(ui.button('Refresh Today'));
+    await ui.button('Complete').props.onPress();
+    assert.equal(writes, 1);
+    assert.equal(reads, 1);
+    ui.leave();
+  }
+});
+
+test('a failed automatic refresh after a locked response keeps the action blocked until manual refresh succeeds', async () => {
+  let reads = 0, writes = 0;
+  const ui = await screen(async () => {
+    reads++;
+    if (reads === 2) throw new ApiError('offline', null, 'network_error');
+    return openToday({ occurrences: [occurrence({ state: reads === 1 ? 'in_progress' : 'excused' })] });
+  }, undefined, undefined, async () => { writes++; throw new ApiError('locked', 409, 'occurrence_locked'); });
+  await ui.button('Complete').props.onPress();
+  assert.equal(reads, 2);
+  assert.equal(ui.button('Complete').props.disabled, true);
+  assert.match(ui.texts().join(' '), /locked/i);
+  await ui.button('Complete').props.onPress();
+  assert.equal(writes, 1);
+  await ui.button('Refresh Today').props.onPress();
+  assert.equal(reads, 3);
+  assert.equal(ui.button('Complete'), undefined);
+  assert.ok(ui.texts().includes('Status: Excused'));
+});
+
+test('sign-out clears pending completion state immediately and ignores the response', async () => {
+  const mutation = deferred(), logout = deferred();
+  let reads = 0;
+  const ui = await screen(async () => { reads++; return openToday(); }, undefined, undefined, () => mutation.promise);
+  const pending = ui.button('Complete').props.onPress();
+  ui.auth.signOut = () => logout.promise;
+  const signingOut = ui.sessions.signOut();
+  cleared(ui);
+  assert.equal(Object.keys(ui.store().snapshot().completions).length, 0);
+  mutation.resolve(completedOccurrence());
+  await pending;
+  cleared(ui);
+  assert.equal(reads, 1);
+  logout.resolve({ error: null });
+  await signingOut;
+});
+
+for (const outcome of ['success', 'failure']) test(`navigation ignores stale completion ${outcome}, including after refocus`, async () => {
+  const mutation = deferred();
+  let reads = 0, writes = 0;
+  const ui = await screen(async () => { reads++; return openToday(); }, undefined, undefined,
+    () => { writes++; return mutation.promise; });
+  const captured = ui.button('Complete').props.onPress;
+  const pending = captured();
+  ui.leave();
+  cleared(ui);
+  assert.equal(Object.keys(ui.store().snapshot().completions).length, 0);
+  await captured();
+  assert.equal(writes, 1);
+  ui.focus();
+  await flush();
+  const accepted = ui.store().snapshot();
+  assert.equal(ui.button('Complete').props.disabled, true);
+  await ui.button('Complete').props.onPress();
+  assert.equal(writes, 1);
+  if (outcome === 'success') mutation.resolve(completedOccurrence());
+  else mutation.reject(new ApiError('old failure', 409, 'occurrence_locked'));
+  await pending;
+  assert.equal(ui.store().snapshot().today, accepted.today);
+  assert.equal(ui.store().snapshot().error, accepted.error);
+  assert.equal(reads, 2);
+  assert.equal(ui.button('Complete').props.disabled, true);
+  assert.equal(ui.button('Undo'), undefined);
+  assert.ok(ui.button('Refresh Today'));
+  assert.doesNotMatch(ui.texts().join(' '), /old failure|locked by an excuse/);
+  await ui.button('Complete').props.onPress();
+  assert.equal(writes, 1);
+  await ui.button('Refresh Today').props.onPress();
+  assert.equal(reads, 3);
+  assert.ok(!ui.button('Complete').props.disabled);
+  assert.equal(ui.button('Refresh Today'), undefined);
+});
+
+for (const outcome of ['success', 'failure']) test(`account change ignores stale completion ${outcome} even with a repeated occurrence ID`, async () => {
+  const mutation = deferred();
+  let reads = 0, writes = 0;
+  const ui = await screen(async s => {
+    reads++;
+    return openToday({ occurrences: [occurrence({ owner_id: s.user.id, snapshot: { ...occurrence().snapshot, name: `${s.user.id} habit` } })] });
+  }, undefined, undefined, () => { writes++; return mutation.promise; });
+  const captured = ui.button('Complete').props.onPress;
+  const pending = captured();
+  ui.event(session('b'));
+  await flush();
+  const accepted = ui.store().snapshot();
+  assert.ok(ui.texts().includes('b habit'));
+  await captured();
+  assert.equal(writes, 1);
+  if (outcome === 'success') mutation.resolve(completedOccurrence());
+  else mutation.reject(new ApiError('old failure', 401, 'http_401'));
+  await pending;
+  assert.equal(ui.store().snapshot(), accepted);
+  assert.equal(reads, 2);
+  assert.equal(Object.keys(ui.store().snapshot().completions).length, 0);
+});
+
+for (const outcome of ['success', 'failure']) test(`displayed date change ignores stale completion ${outcome} without inserting the old occurrence`, async () => {
+  const mutation = deferred();
+  let reads = 0, writes = 0;
+  const nextDay = openToday({ local_date: '2026-10-11', timezone: 'UTC', server_time: '2026-10-11T12:00:00Z',
+    occurrences: [occurrence({ id: 'next-day-row', local_date: '2026-10-11', closes_at: '2026-10-12T00:00:00Z' })] });
+  const ui = await screen(async () => ++reads === 1 ? openToday() : nextDay, undefined, undefined,
+    () => { writes++; return mutation.promise; });
+  const captured = ui.button('Complete').props.onPress;
+  const pending = captured();
+  await ui.list().onRefresh();
+  const accepted = ui.store().snapshot();
+  await captured();
+  assert.equal(writes, 1);
+  if (outcome === 'success') mutation.resolve(completedOccurrence());
+  else mutation.reject(new ApiError('old failure', null, 'network_error'));
+  await pending;
+  assert.equal(ui.store().snapshot(), accepted);
+  assert.equal(reads, 2);
+  assert.equal(ui.list().data.length, 1);
+  assert.equal(ui.list().data[0].id, 'next-day-row');
+  assert.equal(Object.keys(ui.store().snapshot().completions).length, 0);
+});
+
+test('a refreshed same-day list that drops an occurrence cannot be repopulated by its pending completion', async () => {
+  const mutation = deferred();
+  let reads = 0;
+  const ui = await screen(async () => ++reads === 1 ? openToday() : openToday({ occurrences: [] }), undefined, undefined,
+    () => mutation.promise);
+  const pending = ui.button('Complete').props.onPress();
+  await ui.list().onRefresh();
+  mutation.resolve(completedOccurrence());
+  await pending;
+  assert.equal(ui.list().data.length, 0);
+  assert.equal(reads, 2);
+  assert.equal(Object.keys(ui.store().snapshot().completions).length, 0);
 });
 
 test('Home links to Today and its route is protected for ready accounts only', () => {
