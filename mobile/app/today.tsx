@@ -1,8 +1,8 @@
 import { useCallback, useState, useSyncExternalStore } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { ActivityIndicator, AppState, Button, FlatList, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, Button, FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
 import { styles } from '../components/form';
-import { readToday, setOccurrenceCompletion, type OccurrenceResult } from '../lib/api';
+import { readToday, setOccurrenceCompletion, setOccurrenceProgress, type OccurrenceResult } from '../lib/api';
 import { useSession } from '../lib/session';
 import { TodayStore } from '../lib/today-store';
 
@@ -16,8 +16,8 @@ const statusLabels: Record<OccurrenceResult['state'], string> = {
 
 export default function Today() {
   const { store: sessions } = useSession();
-  const [store] = useState(() => new TodayStore(sessions, readToday, setOccurrenceCompletion));
-  const { today, loading, refreshing, error, completions } = useSyncExternalStore(store.subscribe, store.snapshot);
+  const [store] = useState(() => new TodayStore(sessions, readToday, setOccurrenceCompletion, setOccurrenceProgress));
+  const { today, loading, refreshing, error, completions, progressDrafts } = useSyncExternalStore(store.subscribe, store.snapshot);
   useFocusEffect(useCallback(() => {
     store.start();
     let previous = AppState.currentState;
@@ -31,6 +31,7 @@ export default function Today() {
   return <FlatList
     style={localStyles.screen}
     contentContainerStyle={styles.form}
+    keyboardShouldPersistTaps="handled"
     data={today?.occurrences ?? []}
     keyExtractor={occurrence => occurrence.id}
     refreshing={refreshing}
@@ -53,6 +54,7 @@ export default function Today() {
     renderItem={({ item }) => {
       const action = store.completionAction(item);
       const completion = completions[item.id];
+      const progressEditable = store.canSetProgress(item);
       return <View style={localStyles.card}>
         <Text accessibilityRole="header" style={styles.label}>{item.snapshot.name}</Text>
         <Text style={styles.message}>{item.snapshot.type === 'binary' ? 'Binary' : 'Target'}</Text>
@@ -60,6 +62,27 @@ export default function Today() {
           Progress: {item.progress} / {item.snapshot.target}{item.snapshot.unit ? ` ${item.snapshot.unit}` : ''}
         </Text>}
         <Text style={styles.message}>Status: {statusLabels[item.state]}</Text>
+        {item.snapshot.type === 'target' && !progressEditable && progressDrafts[item.id] !== undefined &&
+          <Text style={styles.message}>Entered progress: {progressDrafts[item.id] || '(empty)'}</Text>}
+        {progressEditable && <>
+          <Text style={styles.label}>Total progress</Text>
+          <TextInput
+            accessibilityLabel={`Total progress for ${item.snapshot.name}`}
+            style={styles.input}
+            value={store.progressValue(item)}
+            onChangeText={value => store.setProgressDraft(item, value)}
+            inputMode="numeric"
+            keyboardType="number-pad"
+            editable={!completion?.pending && !completion?.refreshRequired}
+          />
+          <Text style={styles.message}>Set the total to 0 or more. You can lower it before the deadline.</Text>
+          <Button
+            title="Save progress"
+            accessibilityLabel={`Save progress for ${item.snapshot.name}`}
+            onPress={() => store.setProgress(item)}
+            disabled={completion?.pending || completion?.refreshRequired}
+          />
+        </>}
         {action !== null && <Button
           title={action ? 'Complete' : 'Undo'}
           accessibilityLabel={`${action ? 'Complete' : 'Undo'} ${item.snapshot.name}`}

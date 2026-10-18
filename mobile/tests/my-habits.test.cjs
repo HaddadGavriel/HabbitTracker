@@ -90,6 +90,27 @@ test('My habits renders Active as the selected backend filter and retains creati
   assert.equal(ui.button('Restore'), undefined);
 });
 
+test('active and archived owned cards link directly to their own history without restoring', async () => {
+  let restores = 0;
+  const ui = await screen(async (_session, status) => status === 'active'
+    ? [habit({ id: 'active-id', name: 'Active habit' })]
+    : [habit({ id: 'archived-id', name: 'Archived habit', archived_at: '2026-10-10T13:00:00Z' })],
+  async () => { restores++; return habit(); });
+  for (const status of ['active', 'archived']) {
+    if (status === 'archived') {
+      ui.tab('Archived').props.onPress();
+      await flush();
+    }
+    const links = ui.render().filter(node => node.type === 'Link' && node.props.href.pathname === '/habit-history');
+    assert.equal(links.length, 1);
+    assert.equal(links[0].props.href.params.id, `${status}-id`);
+    assert.equal(links[0].props.accessibilityLabel, `View history for ${status === 'active' ? 'Active' : 'Archived'} habit`);
+    assert.equal(text(links[0]), 'View history');
+    assert.equal(ui.button('Confirm restore'), undefined);
+    assert.equal(restores, 0);
+  }
+});
+
 test('Archived cards are noneditable and restore needs confirmation with a working Cancel button', async () => {
   let restores = 0;
   const statuses = [];

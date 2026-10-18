@@ -217,6 +217,183 @@ test('completion timeout reports possible processing and ignores late success wi
   assert.equal(requests, 1);
 });
 
+test('target progress PUT sends absolute values including reductions and zero with current credentials', async () => {
+  const occurrence = { ...today.occurrences[2], progress: 12, completed: true, state: 'completed' };
+  const calls = [];
+  const api = client(async (url, init) => {
+    calls.push({ url, init });
+    const { progress } = JSON.parse(init.body);
+    return json(200, {
+      ...occurrence, progress, completed: progress >= occurrence.snapshot.target,
+      state: progress >= occurrence.snapshot.target ? 'completed' : 'in_progress',
+      updated_at: '2026-10-10T23:31:00Z',
+    });
+  });
+  for (const progress of [12, 3, 0, Number.MAX_SAFE_INTEGER]) {
+    const currentSession = { ...session, access_token: `current-access-${progress}` };
+    const result = await api.setOccurrenceProgress(currentSession, 'id/with spaces?#%', progress);
+    assert.deepEqual(result, {
+      ...occurrence, progress, completed: progress >= occurrence.snapshot.target,
+      state: progress >= occurrence.snapshot.target ? 'completed' : 'in_progress',
+      updated_at: '2026-10-10T23:31:00Z',
+    });
+    const { url, init } = calls.at(-1);
+    assert.equal(url, 'https://api.example.test/occurrences/id%2Fwith%20spaces%3F%23%25/progress');
+    assert.equal(init.method, 'PUT');
+    assert.deepEqual(JSON.parse(init.body), { progress });
+    assert.equal(init.headers.Authorization, `Bearer ${currentSession.access_token}`);
+    assert.equal(init.headers['Content-Type'], 'application/json');
+    assert.equal(init.headers['Idempotency-Key'], undefined);
+    assert.ok(init.signal instanceof AbortSignal);
+  }
+  assert.equal(calls.length, 4);
+});
+
+test('target progress rejects unsafe, fractional, negative and nonnumber inputs before any request', async () => {
+  let requests = 0;
+  const api = client(async () => { requests++; return json(200, today.occurrences[2]); });
+  for (const progress of [
+    Number.MAX_SAFE_INTEGER + 1, Number('9007199254740993'), -1, 0.5,
+    NaN, Infinity, -Infinity, '3', '', true, false, null, undefined, 3n,
+  ]) {
+    await assert.rejects(api.setOccurrenceProgress(session, 'occurrence-id', progress),
+      failure(api, null, 'invalid_progress', 'Progress must be a nonnegative safe integer.'));
+  }
+  assert.equal(requests, 0);
+});
+
+test('target progress preserves deadline, locked, ownership, authentication and validation rejections without retry', async () => {
+  for (const [status, detail, code, message] of [
+    [409, { code: 'occurrence_closed', message: 'Occurrence is closed' }, 'occurrence_closed', 'Occurrence is closed'],
+    [409, { code: 'occurrence_locked', message: 'Occurrence is locked by an excuse submission' }, 'occurrence_locked', 'Occurrence is locked by an excuse submission'],
+    [409, { code: 'wrong_occurrence_type', message: 'Operation does not match occurrence type' }, 'wrong_occurrence_type', 'Operation does not match occurrence type'],
+    [404, { code: 'occurrence_not_found', message: 'Occurrence not found' }, 'occurrence_not_found', 'Occurrence not found'],
+    [404, { code: 'profile_not_found', message: 'Create a profile to complete onboarding' }, 'profile_not_found', 'Create a profile to complete onboarding'],
+    [401, 'Invalid or expired Supabase access token', 'http_401', 'Invalid or expired Supabase access token'],
+    [422, [{ loc: ['body', 'progress'], input: session.access_token }], 'validation_error', 'Request validation failed. Check the submitted fields.'],
+    [503, null, 'http_503', 'API failed with HTTP 503'],
+  ]) {
+    let requests = 0;
+    const api = client(async () => { requests++; return json(status, { detail }); });
+    await assert.rejects(api.setOccurrenceProgress(session, 'occurrence-id', 3), failure(api, status, code, message));
+    assert.equal(requests, 1);
+  }
+});
+
+test('target progress never retries ambiguous network or invalid-response outcomes', async () => {
+  for (const [respond, status, code, message] of [
+    [() => { throw new Error(`Lost connection ${session.access_token}`); }, null, 'network_error', 'Unable to reach the API. Check your connection.'],
+    [() => new Response('truncated response', { status: 200 }), 200, 'invalid_response', 'API returned an invalid JSON response'],
+  ]) {
+    let requests = 0;
+    const api = client(async () => { requests++; return respond(); });
+    await assert.rejects(api.setOccurrenceProgress(session, 'occurrence-id', 3), failure(api, status, code, message));
+    assert.equal(requests, 1);
+  }
+});
+
+test('target progress timeout stays ambiguous even if the server later confirms a reduction', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let finish, signal, requests = 0;
+  const api = client((_url, init) => {
+    requests++; signal = init.signal;
+    return new Promise(resolve => { finish = resolve; });
+  });
+  const pending = api.setOccurrenceProgress(session, 'occurrence-id', 3);
+  const timedOut = failure(api, null, 'request_timeout', 'API request timed out after 30 seconds. The server may have processed the request.');
+  const rejected = assert.rejects(pending, timedOut);
+  t.mock.timers.tick(30_000);
+  await rejected;
+  assert.equal(signal.aborted, true);
+  finish(json(200, { ...today.occurrences[2], progress: 3, completed: false, state: 'in_progress' }));
+  await assert.rejects(pending, timedOut);
+  assert.equal(requests, 1);
+});
+
+const history = {
+  habit_id: 'owned-archived-habit', next_cursor: 'opaque-next-cursor',
+  occurrences: today.occurrences.map((occurrence, index) => ({
+    ...occurrence, habit_id: 'owned-archived-habit', local_date: `2026-10-${String(11 - index).padStart(2, '0')}`,
+    excuse: index < 2 ? null : {
+      id: `excuse-${index}`, explanation: 'Unable to finish this occurrence.',
+      status: ['rejected', 'pending', 'approved'][index - 2],
+      decision_source: index === 3 ? null : index === 4 ? 'automatic' : 'friend',
+      decided_by: index === 2 ? 'deciding-friend-id' : null,
+      decided_at: index === 3 ? null : '2026-10-10T21:00:00Z',
+      created_at: '2026-10-10T20:00:00Z',
+    },
+  })),
+};
+
+test('owner history preserves stored snapshots, states and compact excuses for archived habits', async () => {
+  const calls = [];
+  const api = client(async (url, init) => { calls.push({ url, init }); return json(200, history); });
+  for (const cursor of [undefined, null, 'opaque+/with spaces?&#%=']) {
+    const currentSession = { ...session, access_token: 'refreshed-history-access' };
+    assert.deepEqual(await api.readHabitHistory(currentSession, 'habit/with spaces?#%', cursor), history);
+    const { url, init } = calls.at(-1);
+    assert.equal(url, `https://api.example.test/habits/habit%2Fwith%20spaces%3F%23%25/history?limit=30${cursor == null ? '' : '&cursor=opaque%2B%2Fwith%20spaces%3F%26%23%25%3D'}`);
+    assert.equal(init.method, 'GET');
+    assert.equal(init.body, undefined);
+    assert.equal(init.headers.Authorization, 'Bearer refreshed-history-access');
+    assert.ok(init.signal instanceof AbortSignal);
+  }
+  assert.equal(calls.length, 3);
+});
+
+test('owner history returns an empty page and uses the exact next cursor for continuation', async () => {
+  const pages = [history, { habit_id: history.habit_id, occurrences: [], next_cursor: null }];
+  const calls = [];
+  const api = client(async (url, init) => { calls.push({ url, init }); return json(200, pages[calls.length - 1]); });
+  const first = await api.readHabitHistory(session, history.habit_id);
+  assert.deepEqual(first, history);
+  const second = await api.readHabitHistory(session, history.habit_id, first.next_cursor);
+  assert.deepEqual(second, pages[1]);
+  assert.equal(calls[1].url, 'https://api.example.test/habits/owned-archived-habit/history?limit=30&cursor=opaque-next-cursor');
+});
+
+test('owner streak reads preserve server-calculated counts and provisional zero without local derivation', async () => {
+  const calls = [];
+  for (const [current_streak, provisional] of [[42, false], [2, true], [0, true], [0, false]]) {
+    const streak = { habit_id: 'owned-archived-habit', current_streak, provisional, calculated_at: '2026-10-11T23:00:00Z' };
+    const api = client(async (url, init) => { calls.push({ url, init }); return json(200, streak); });
+    assert.deepEqual(await api.readHabitStreak({ ...session, access_token: 'current-streak-access' }, 'habit/with spaces?#%'), streak);
+    const { url, init } = calls.at(-1);
+    assert.equal(url, 'https://api.example.test/habits/habit%2Fwith%20spaces%3F%23%25/streak');
+    assert.equal(init.method, 'GET');
+    assert.equal(init.body, undefined);
+    assert.equal(init.headers.Authorization, 'Bearer current-streak-access');
+    assert.ok(init.signal instanceof AbortSignal);
+  }
+  assert.equal(calls.length, 4);
+});
+
+test('owner history and streak keep access failures typed and never replace errors with empty results', async () => {
+  for (const operation of ['readHabitHistory', 'readHabitStreak']) {
+    for (const [status, detail, code, message] of [
+      [401, 'Invalid or expired Supabase access token', 'http_401', 'Invalid or expired Supabase access token'],
+      [404, { code: 'profile_not_found', message: 'Create a profile to complete onboarding' }, 'profile_not_found', 'Create a profile to complete onboarding'],
+      [404, { code: 'habit_not_found', message: 'Habit not found' }, 'habit_not_found', 'Habit not found'],
+      [422, { code: 'invalid_history_cursor', message: 'Invalid history cursor for this habit and date range' }, 'invalid_history_cursor', 'Invalid history cursor for this habit and date range'],
+      [503, null, 'http_503', 'API failed with HTTP 503'],
+    ]) {
+      let requests = 0;
+      const api = client(async () => { requests++; return json(status, { detail }); });
+      await assert.rejects(api[operation](session, history.habit_id), failure(api, status, code, message));
+      assert.equal(requests, 1);
+    }
+    for (const [respond, status, code, message] of [
+      [() => { throw new Error(`Lost connection ${session.access_token}`); }, null, 'network_error', 'Unable to reach the API. Check your connection.'],
+      [() => new Response('not JSON'), 200, 'invalid_response', 'API returned an invalid JSON response'],
+    ]) {
+      let requests = 0;
+      const api = client(async () => { requests++; return respond(); });
+      await assert.rejects(api[operation](session, history.habit_id), failure(api, status, code, message));
+      assert.equal(requests, 1);
+    }
+  }
+});
+
 test('habits GET requests active habits with the supplied current session and preserves the array contract', async () => {
   const binary = {
     id: '00000000-0000-0000-0000-000000000001', owner_id: '00000000-0000-0000-0000-000000000010',
