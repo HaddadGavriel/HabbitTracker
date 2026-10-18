@@ -142,6 +142,49 @@ export const setOccurrenceCompletion = (session: Session, id: string, completed:
     method: 'PUT', body: JSON.stringify({ completed }),
   });
 
+/** Absolute target assignment; never serialize values JavaScript cannot represent exactly. */
+export async function setOccurrenceProgress(session: Session, id: string, progress: number): Promise<OccurrenceResult> {
+  if (!Number.isSafeInteger(progress) || progress < 0) {
+    throw new ApiError('Progress must be a nonnegative safe integer.', null, 'invalid_progress');
+  }
+  return request<OccurrenceResult>(`/occurrences/${encodeURIComponent(id)}/progress`, session, {
+    method: 'PUT', body: JSON.stringify({ progress }),
+  });
+}
+
+export type HistoryExcuse = {
+  id: string;
+  explanation: string;
+  status: 'pending' | 'approved' | 'rejected';
+  decision_source: 'automatic' | 'friend' | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  created_at: string;
+};
+
+export type HistoryOccurrence = OccurrenceResult & { excuse: HistoryExcuse | null };
+
+export type HistoryResult = {
+  habit_id: string;
+  occurrences: HistoryOccurrence[];
+  next_cursor: string | null;
+};
+
+export type StreakResult = {
+  habit_id: string;
+  current_streak: number;
+  provisional: boolean;
+  calculated_at: string;
+};
+
+/** Owner reads also support archived habits. Return opaque cursors unchanged. */
+export const readHabitHistory = (session: Session, id: string, cursor?: string | null): Promise<HistoryResult> =>
+  request<HistoryResult>(`/habits/${encodeURIComponent(id)}/history?limit=30${cursor == null ? '' : `&cursor=${encodeURIComponent(cursor)}`}`, session, { method: 'GET' });
+
+/** Current streaks and provisional status are calculated only by the server. */
+export const readHabitStreak = (session: Session, id: string): Promise<StreakResult> =>
+  request<StreakResult>(`/habits/${encodeURIComponent(id)}/streak`, session, { method: 'GET' });
+
 /** Owner identity and timestamps are server-managed; binary payloads omit target/unit. */
 export type HabitCreate = {
   name: string;

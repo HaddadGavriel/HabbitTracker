@@ -32,6 +32,8 @@ const today = (changes = {}) => ({
 });
 const openToday = (changes = {}) => today({ server_time: '2026-10-10T12:00:00Z', ...changes });
 const completedOccurrence = (changes = {}) => occurrence({ completed: true, state: 'completed', updated_at: '2026-10-10T12:01:00Z', ...changes });
+const targetOccurrence = (changes = {}) => occurrence({ snapshot: { ...occurrence().snapshot,
+  name: 'Read snapshot', type: 'target', target: 10, unit: 'pages' }, ...changes });
 function clock() {
   let elapsed = 0, nextId = 0;
   const timers = new Map();
@@ -76,7 +78,9 @@ function text(tree) {
   if (typeof tree === 'string' || typeof tree === 'number') return String(tree);
   return tree && typeof tree === 'object' ? text(tree.props.children) : '';
 }
-async function screen(readToday, readProfile = async s => profile(s.user.id), initial = session(), setOccurrenceCompletion = async () => assert.fail('Unexpected completion request')) {
+async function screen(readToday, readProfile = async s => profile(s.user.id), initial = session(),
+  setOccurrenceCompletion = async () => assert.fail('Unexpected completion request'),
+  setOccurrenceProgress = async () => assert.fail('Unexpected progress request')) {
   let authEvent, store, focus, cleanup;
   const timer = clock();
   const { TodayStore } = compile('lib/today-store.ts', path => lib(path.slice(2)), timer.globals);
@@ -101,9 +105,9 @@ async function screen(readToday, readProfile = async s => profile(s.user.id), in
     react: { useCallback: fn => fn, useState: initial => [store ??= initial()], useSyncExternalStore: (_subscribe, snapshot) => snapshot() },
     'expo-router': { useFocusEffect: callback => { focus = callback; } },
     'react-native': { AppState, ActivityIndicator: 'ActivityIndicator', Button: 'Button', FlatList: 'FlatList',
-      Text: 'Text', View: 'View', StyleSheet: { create: value => value } },
+      Text: 'Text', TextInput: 'TextInput', View: 'View', StyleSheet: { create: value => value } },
     '../components/form': { styles: {} },
-    '../lib/api': { readToday, setOccurrenceCompletion },
+    '../lib/api': { readToday, setOccurrenceCompletion, setOccurrenceProgress },
     '../lib/today-store': { TodayStore },
     '../lib/session': { useSession: () => ({ store: sessions }) },
   };
@@ -122,6 +126,7 @@ async function screen(readToday, readProfile = async s => profile(s.user.id), in
     texts: () => render().filter(node => node.type === 'Text').map(text),
     list,
     button: (title, id) => (id ? row(id) : render()).find(node => node.type === 'Button' && node.props.title === title),
+    input: (id = 'occurrence-a') => row(id).find(node => node.type === 'TextInput'),
     event: value => authEvent('SIGNED_IN', value),
     leave: () => cleanup(),
     focus: () => { cleanup = focus(); },
@@ -440,7 +445,7 @@ test('Complete and Undo controls send explicit values and render confirmed resul
   await undoPending;
 });
 
-test('eligibility uses original deadline and server time, leaving targets and locked states read-only', async () => {
+test('eligibility uses original deadline and server time for both habit types, leaving locked states read-only', async () => {
   const rows = [
     occurrence({ id: 'open' }),
     completedOccurrence({ id: 'done' }),
@@ -458,10 +463,11 @@ test('eligibility uses original deadline and server time, leaving targets and lo
   assert.equal(ui.store().snapshot().today.timezone, 'America/Los_Angeles');
   assert.equal(rows[0].timezone, 'Asia/Tokyo');
   for (const item of rows.slice(2)) {
-    assert.ok(!ui.row(item.id).some(node => node.type === 'Button'), `${item.id} must be read-only`);
+    if (item.snapshot.type === 'target') assert.ok(ui.button('Save progress', item.id));
+    else assert.ok(!ui.row(item.id).some(node => node.type === 'Button'), `${item.id} must be read-only`);
     await ui.store().setCompletion(item, item.state !== 'completed');
   }
-  assert.equal(ui.render().filter(node => node.type === 'Button').length, 2);
+  assert.equal(ui.render().filter(node => node.type === 'Button').length, 4);
 });
 
 test('deadline timer hides actions at the exact server deadline and rejects an already captured control', async () => {
@@ -916,6 +922,412 @@ test('a refreshed same-day list that drops an occurrence cannot be repopulated b
   assert.equal(ui.list().data.length, 0);
   assert.equal(reads, 2);
   assert.equal(Object.keys(ui.store().snapshot().completions).length, 0);
+});
+
+test('progress input accepts exact nonnegative integers and rejects fractions, signs, exponents and unsafe integers', () => {
+  const { parseProgress } = lib('today-store');
+  for (const [value, expected] of [['0', 0], [' 0008 ', 8], ['9007199254740991', Number.MAX_SAFE_INTEGER]]) {
+    assert.equal(parseProgress(value), expected);
+  }
+  for (const value of ['', ' ', '-1', '+1', '1.0', '1.5', '1e3', '0x10', 'NaN', 'Infinity', 'true', '1,000',
+    '9007199254740992', '9007199254740993', '9'.repeat(400)]) {
+    assert.throws(() => parseProgress(value), /nonnegative whole number|save it exactly/, value);
+  }
+});
+
+test('target controls save absolute over-target progress then reduce to zero and reopen, using snapshot target and unit', async () => {
+  const first = deferred(), second = deferred(), firstRead = deferred(), secondRead = deferred();
+  const writes = [];
+  let reads = 0;
+  const row = targetOccurrence({ progress: 3 });
+  const ui = await screen(() => [Promise.resolve(openToday({ occurrences: [row] })), firstRead.promise, secondRead.promise][reads++],
+    undefined, undefined, undefined, (s, id, progress) => { writes.push({ s, id, progress }); return writes.length === 1 ? first.promise : second.promise; });
+  assert.equal(ui.input().props.value, '3');
+  assert.equal(ui.input().props.accessibilityLabel, 'Total progress for Read snapshot');
+  assert.equal(ui.list().keyboardShouldPersistTaps, 'handled');
+  assert.ok(ui.texts().includes('Progress: 3 / 10 pages'));
+  ui.input().props.onChangeText('15');
+  const action = ui.button('Save progress').props.onPress;
+  const pending = action();
+  await action();
+  assert.deepEqual(writes.map(({ id, progress }) => [id, progress]), [['occurrence-a', 15]]);
+  assert.equal(writes[0].s.access_token, 'a-token');
+  assert.equal(ui.input().props.value, '15');
+  assert.equal(ui.input().props.editable, false);
+  assert.equal(ui.button('Save progress').props.disabled, true);
+  ui.input().props.onChangeText('999');
+  assert.equal(ui.input().props.value, '15');
+  assert.ok(ui.render().some(node => node.type === 'ActivityIndicator' && node.props.accessibilityLabel === 'Updating Read snapshot'));
+  const completed = targetOccurrence({ progress: 15, completed: true, state: 'completed', updated_at: '2026-10-10T12:01:00Z' });
+  first.resolve(completed);
+  await flush();
+  assert.equal(ui.list().data[0], completed);
+  assert.ok(ui.texts().includes('Status: Completed'));
+  assert.equal(ui.input().props.value, '15');
+  assert.equal(ui.button('Undo'), undefined);
+  assert.equal(reads, 2);
+  firstRead.resolve(openToday({ occurrences: [completed] }));
+  await pending;
+  ui.input().props.onChangeText('0');
+  const reducing = ui.button('Save progress').props.onPress();
+  assert.equal(writes[1].progress, 0);
+  const reopened = targetOccurrence({ updated_at: '2026-10-10T12:02:00Z' });
+  second.resolve(reopened);
+  await flush();
+  assert.equal(ui.list().data[0], reopened);
+  assert.ok(ui.texts().includes('Status: In progress'));
+  assert.ok(ui.texts().includes('Progress: 0 / 10 pages'));
+  secondRead.resolve(openToday({ occurrences: [reopened] }));
+  await reducing;
+  assert.equal(reads, 3);
+  assert.equal(ui.input().props.editable, true);
+});
+
+test('invalid target drafts stay visible with per-occurrence errors and cannot reach the API', async () => {
+  let writes = 0;
+  const rows = [targetOccurrence(), targetOccurrence({ id: 'second', habit_id: 'habit-b' })];
+  const ui = await screen(async () => openToday({ occurrences: rows }), undefined, undefined, undefined,
+    async () => { writes++; throw new ApiError('private validation detail', 422, 'validation_error'); });
+  for (const value of ['-1', '1.5', '', '9007199254740993']) {
+    ui.input().props.onChangeText(value);
+    await ui.button('Save progress').props.onPress();
+    assert.equal(ui.input().props.value, value);
+    assert.equal(writes, 0);
+    assert.match(ui.row('occurrence-a').map(text).join(' '), /nonnegative whole number|save it exactly/);
+    assert.doesNotMatch(ui.row('second').map(text).join(' '), /nonnegative whole number|save it exactly/);
+    assert.ok(!ui.button('Save progress', 'second').props.disabled);
+  }
+  ui.input().props.onChangeText('8');
+  assert.doesNotMatch(ui.row('occurrence-a').map(text).join(' '), /save it exactly/);
+  await ui.button('Save progress').props.onPress();
+  assert.equal(writes, 1);
+  assert.equal(ui.input().props.value, '8');
+  assert.equal(ui.input().props.editable, true);
+  assert.match(ui.texts().join(' '), /Unable to change/);
+  assert.doesNotMatch(ui.texts().join(' '), /private/);
+  assert.equal(ui.button('Refresh Today'), undefined);
+  await ui.button('Save progress').props.onPress();
+  assert.equal(writes, 2, 'definite validation failures allow an explicit retry');
+});
+
+test('unsafe existing progress is never prefilled or silently resubmitted', async () => {
+  let writes = 0;
+  const row = targetOccurrence({ progress: Number.MAX_SAFE_INTEGER + 1, completed: true, state: 'completed' });
+  const ui = await screen(async () => openToday({ occurrences: [row] }), undefined, undefined, undefined,
+    async () => { writes++; assert.fail('No progress assignment expected'); });
+  assert.equal(ui.input().props.value, '');
+  await ui.button('Save progress').props.onPress();
+  assert.equal(writes, 0);
+  assert.match(ui.texts().join(' '), /nonnegative whole number/);
+});
+
+test('locked and closed targets have no progress controls and captured controls expire at the original deadline', async () => {
+  const rows = [targetOccurrence(),
+    ...['missed', 'excused', 'justification_pending'].map(state => targetOccurrence({ id: state, state })),
+    targetOccurrence({ id: 'closed', closes_at: '2026-10-10T14:59:59Z' }),
+    targetOccurrence({ id: 'closed-completed', completed: true, state: 'completed', progress: 10, closes_at: '2026-10-10T14:59:59Z' }),
+    targetOccurrence({ id: 'invalid-deadline', closes_at: 'invalid' }),
+  ];
+  const ui = await screen(async () => openToday({ occurrences: rows, server_time: '2026-10-10T14:59:59Z' }));
+  for (const row of rows.slice(1)) {
+    assert.equal(ui.input(row.id), undefined);
+    assert.equal(ui.button('Save progress', row.id), undefined);
+    ui.store().setProgressDraft(row, '3');
+    await ui.store().setProgress(row);
+  }
+  const input = ui.input().props.onChangeText, press = ui.button('Save progress').props.onPress;
+  input('4');
+  ui.advance(999);
+  assert.ok(ui.button('Save progress'));
+  ui.advance(1);
+  assert.equal(ui.button('Save progress'), undefined);
+  assert.equal(ui.input(), undefined);
+  await press();
+  input('5');
+  assert.equal(ui.store().snapshot().progressDrafts['occurrence-a'], '4');
+  assert.ok(ui.texts().includes('Entered progress: 4'));
+  ui.leave();
+  assert.equal(ui.timerCount(), 0);
+});
+
+for (const [code, state, message] of [['occurrence_closed', 'missed', /deadline has passed/],
+  ['occurrence_locked', 'excused', /locked by an excuse/]]) {
+  test(`target ${code} preserves the draft through failed automatic refresh and blocks another assignment`, async () => {
+    let reads = 0, writes = 0;
+    const ui = await screen(async () => {
+      reads++;
+      if (reads === 2) throw new ApiError('offline', null, 'network_error');
+      return openToday({ occurrences: [targetOccurrence({ state: reads > 2 ? state : 'in_progress' })] });
+    }, undefined, undefined, undefined, async () => { writes++; throw new ApiError('private reason', 409, code); });
+    ui.input().props.onChangeText('7');
+    const press = ui.button('Save progress').props.onPress;
+    await press();
+    assert.equal(reads, 2);
+    assert.equal(writes, 1);
+    assert.equal(ui.input().props.value, '7');
+    assert.equal(ui.input().props.editable, false);
+    assert.match(ui.texts().join(' '), message);
+    assert.doesNotMatch(ui.texts().join(' '), /private reason/);
+    await press();
+    assert.equal(writes, 1);
+    await ui.button('Refresh Today').props.onPress();
+    assert.equal(ui.button('Save progress'), undefined);
+    assert.equal(ui.list().data[0].state, state);
+    assert.equal(ui.store().snapshot().progressDrafts['occurrence-a'], '7');
+    assert.ok(ui.texts().includes('Entered progress: 7'));
+  });
+}
+
+for (const failure of [new ApiError('private timeout', null, 'request_timeout'), new ApiError('private network', null, 'network_error'),
+  new ApiError('private server', 503, 'http_503'), new ApiError('private response', 200, 'invalid_response')]) {
+  test(`ambiguous target ${failure.code} keeps the draft and requires a successful refresh without repeating the assignment`, async () => {
+    let reads = 0, writes = 0;
+    const refreshed = targetOccurrence({ progress: 7, updated_at: '2026-10-10T12:01:00Z' });
+    const ui = await screen(async () => {
+      reads++;
+      if (reads === 2) throw new ApiError('offline', null, 'network_error');
+      return openToday({ occurrences: [reads > 2 ? refreshed : targetOccurrence()] });
+    }, undefined, undefined, undefined, async () => { writes++; throw failure; });
+    ui.input().props.onChangeText('007');
+    const press = ui.button('Save progress').props.onPress;
+    await press();
+    assert.equal(reads, 1, 'an ambiguous write offers refresh rather than automatically reading or repeating');
+    assert.match(ui.texts().join(' '), /may have succeeded/);
+    assert.doesNotMatch(ui.texts().join(' '), /private/);
+    assert.equal(ui.input().props.value, '007');
+    assert.equal(ui.input().props.editable, false);
+    await press();
+    ui.input().props.onChangeText('3');
+    assert.equal(ui.input().props.value, '007');
+    await ui.button('Refresh Today').props.onPress();
+    assert.equal(ui.button('Save progress').props.disabled, true);
+    assert.equal(ui.input().props.value, '007');
+    await press();
+    await ui.button('Refresh Today').props.onPress();
+    assert.equal(reads, 3);
+    assert.equal(writes, 1);
+    assert.equal(ui.list().data[0], refreshed);
+    assert.equal(ui.input().props.value, '007');
+    assert.equal(ui.input().props.editable, true);
+    assert.equal(ui.button('Refresh Today'), undefined);
+  });
+}
+
+test('a target read started before an ambiguous outcome cannot release its guard or erase its draft', async () => {
+  const mutation = deferred(), oldRead = deferred();
+  let reads = 0, writes = 0;
+  const ui = await screen(() => ++reads === 1 ? Promise.resolve(openToday({ occurrences: [targetOccurrence()] })) : oldRead.promise,
+    undefined, undefined, undefined, () => { writes++; return mutation.promise; });
+  ui.input().props.onChangeText('9');
+  const pending = ui.button('Save progress').props.onPress();
+  const refresh = ui.list().onRefresh();
+  mutation.reject(new ApiError('timeout', null, 'request_timeout'));
+  await pending;
+  oldRead.resolve(openToday({ occurrences: [targetOccurrence()] }));
+  await refresh;
+  assert.equal(ui.button('Save progress').props.disabled, true);
+  assert.equal(ui.input().props.value, '9');
+  await ui.button('Save progress').props.onPress();
+  assert.equal(writes, 1);
+});
+
+for (const outcome of ['success', 'failure']) test(`confirmed target reduction survives an older read ${outcome} and failed subsequent refresh`, async () => {
+  const mutation = deferred(), oldRead = deferred(), latestRead = deferred();
+  let reads = 0;
+  const initial = openToday({ occurrences: [targetOccurrence({ progress: 12, completed: true, state: 'completed' })] });
+  const confirmed = targetOccurrence({ progress: 4, updated_at: '2026-10-10T12:01:00Z' });
+  const ui = await screen(() => [Promise.resolve(initial), oldRead.promise, latestRead.promise][reads++],
+    undefined, undefined, undefined, () => mutation.promise);
+  ui.input().props.onChangeText('4');
+  const refreshing = ui.list().onRefresh();
+  const pending = ui.button('Save progress').props.onPress();
+  mutation.resolve(confirmed);
+  await flush();
+  assert.equal(ui.list().data[0], confirmed);
+  assert.equal(ui.input().props.value, '4');
+  const accepted = ui.store().snapshot();
+  if (outcome === 'success') oldRead.resolve(initial);
+  else oldRead.reject(new Error('old failure'));
+  await refreshing;
+  assert.equal(ui.store().snapshot(), accepted);
+  latestRead.reject(new ApiError('offline', null, 'network_error'));
+  await pending;
+  assert.equal(reads, 3);
+  assert.equal(ui.list().data[0], confirmed);
+  assert.ok(ui.texts().includes('Status: In progress'));
+  assert.ok(ui.texts().includes('Showing the last loaded date and habits.'));
+  assert.ok(ui.button('Retry loading'));
+});
+
+test('a same-day token refresh keeps the target draft and write guard while next requests use renewed credentials', async () => {
+  const mutation = deferred();
+  const readSessions = [], writeSessions = [];
+  const confirmed = targetOccurrence({ progress: 4, updated_at: '2026-10-10T12:01:00Z' });
+  const ui = await screen(async s => {
+    readSessions.push(s);
+    return openToday({ occurrences: [readSessions.length > 2 ? confirmed : targetOccurrence()] });
+  }, undefined, undefined, undefined, s => { writeSessions.push(s); return mutation.promise; });
+  ui.input().props.onChangeText('4');
+  const pending = ui.button('Save progress').props.onPress();
+  const renewed = { ...session(), access_token: 'renewed-token' };
+  ui.event(renewed);
+  await flush();
+  assert.equal(readSessions[1], renewed);
+  assert.equal(ui.input().props.value, '4');
+  assert.equal(ui.button('Save progress').props.disabled, true);
+  await ui.button('Save progress').props.onPress();
+  assert.equal(writeSessions.length, 1);
+  mutation.resolve(confirmed);
+  await pending;
+  assert.equal(readSessions[2], renewed);
+  assert.equal(ui.input().props.editable, true);
+});
+
+test('concurrent binary and target writes keep each row isolated across interleaved confirmation refreshes', async () => {
+  const binaryWrite = deferred(), targetWrite = deferred(), oldRead = deferred(), latestRead = deferred();
+  let reads = 0;
+  const rows = [occurrence(), targetOccurrence({ id: 'target-row', habit_id: 'target-habit' })];
+  const confirmed = [completedOccurrence(), targetOccurrence({ id: 'target-row', habit_id: 'target-habit',
+    progress: 12, completed: true, state: 'completed', updated_at: '2026-10-10T12:01:00Z' })];
+  const ui = await screen(() => [Promise.resolve(openToday({ occurrences: rows })), oldRead.promise, latestRead.promise][reads++],
+    undefined, undefined, () => binaryWrite.promise, () => targetWrite.promise);
+  ui.input('target-row').props.onChangeText('12');
+  const targetPending = ui.button('Save progress', 'target-row').props.onPress();
+  assert.ok(!ui.button('Complete', 'occurrence-a').props.disabled);
+  const binaryPending = ui.button('Complete', 'occurrence-a').props.onPress();
+  binaryWrite.resolve(confirmed[0]);
+  await flush();
+  assert.ok(ui.button('Undo', 'occurrence-a'));
+  assert.equal(ui.input('target-row').props.value, '12');
+  assert.equal(ui.button('Save progress', 'target-row').props.disabled, true);
+  targetWrite.resolve(confirmed[1]);
+  await flush();
+  assert.equal(reads, 3);
+  const accepted = ui.store().snapshot();
+  oldRead.resolve(openToday({ occurrences: [confirmed[0], rows[1]] }));
+  await binaryPending;
+  assert.equal(ui.store().snapshot(), accepted);
+  latestRead.resolve(openToday({ occurrences: confirmed }));
+  await targetPending;
+  assert.equal(ui.list().data[0], confirmed[0]);
+  assert.equal(ui.list().data[1], confirmed[1]);
+  assert.equal(ui.input('target-row').props.value, '12');
+  assert.equal(ui.input('target-row').props.editable, true);
+});
+
+test('mismatched target confirmations preserve the draft and require refresh without changing the row', async () => {
+  for (const changes of [{ progress: 8 }, { completed: true }, { state: 'excused' },
+    { snapshot: { ...targetOccurrence().snapshot, target: 20 } }, { snapshot: { ...targetOccurrence().snapshot, unit: 'minutes' } },
+    { owner_id: 'another-owner' }, { local_date: '2026-10-11' }, { updated_at: 'invalid' }]) {
+    let writes = 0;
+    const original = targetOccurrence();
+    const ui = await screen(async () => openToday({ occurrences: [original] }), undefined, undefined, undefined,
+      async () => { writes++; return targetOccurrence({ progress: 7, updated_at: '2026-10-10T12:01:00Z', ...changes }); });
+    ui.input().props.onChangeText('7');
+    await ui.button('Save progress').props.onPress();
+    assert.equal(ui.list().data[0], original, JSON.stringify(changes));
+    assert.equal(ui.input().props.value, '7');
+    assert.equal(ui.button('Save progress').props.disabled, true);
+    assert.ok(ui.button('Refresh Today'));
+    await ui.button('Save progress').props.onPress();
+    assert.equal(writes, 1);
+    ui.leave();
+  }
+});
+
+for (const outcome of ['success', 'failure']) test(`navigation clears target drafts and ignores late ${outcome} while preserving a returned write guard`, async () => {
+  const mutation = deferred();
+  let reads = 0, writes = 0;
+  const ui = await screen(async () => { reads++; return openToday({ occurrences: [targetOccurrence()] }); },
+    undefined, undefined, undefined, () => { writes++; return mutation.promise; });
+  ui.input().props.onChangeText('6');
+  const input = ui.input().props.onChangeText, press = ui.button('Save progress').props.onPress;
+  const pending = press();
+  ui.leave();
+  cleared(ui);
+  assert.equal(Object.keys(ui.store().snapshot().progressDrafts).length, 0);
+  input('99');
+  await press();
+  assert.equal(writes, 1);
+  ui.focus();
+  await flush();
+  assert.equal(ui.input().props.value, '0');
+  assert.equal(ui.button('Save progress').props.disabled, true);
+  if (outcome === 'success') mutation.resolve(targetOccurrence({ progress: 6, updated_at: '2026-10-10T12:01:00Z' }));
+  else mutation.reject(new ApiError('old failure', 409, 'occurrence_locked'));
+  await pending;
+  assert.equal(ui.list().data[0].progress, 0);
+  assert.equal(ui.button('Save progress').props.disabled, true);
+  assert.doesNotMatch(ui.texts().join(' '), /old failure|locked by an excuse/);
+  await ui.button('Refresh Today').props.onPress();
+  assert.equal(reads, 3);
+  assert.equal(writes, 1);
+  assert.equal(ui.input().props.editable, true);
+});
+
+for (const outcome of ['success', 'failure']) test(`account switch clears target drafts and rejects stale ${outcome} with a repeated occurrence ID`, async () => {
+  const mutation = deferred();
+  let writes = 0;
+  const ui = await screen(async s => openToday({ occurrences: [targetOccurrence({ owner_id: s.user.id,
+    snapshot: { ...targetOccurrence().snapshot, name: `${s.user.id} target` } })] }),
+  undefined, undefined, undefined, () => { writes++; return mutation.promise; });
+  ui.input().props.onChangeText('7');
+  const input = ui.input().props.onChangeText, press = ui.button('Save progress').props.onPress;
+  const pending = press();
+  ui.event(session('b'));
+  assert.equal(Object.keys(ui.store().snapshot().progressDrafts).length, 0);
+  await flush();
+  assert.equal(ui.input().props.value, '0');
+  assert.equal(ui.input().props.editable, true);
+  assert.ok(ui.texts().includes('b target'));
+  input('55');
+  await press();
+  const accepted = ui.store().snapshot();
+  if (outcome === 'success') mutation.resolve(targetOccurrence({ progress: 7, updated_at: '2026-10-10T12:01:00Z' }));
+  else mutation.reject(new ApiError('old failure', null, 'network_error'));
+  await pending;
+  assert.equal(ui.store().snapshot(), accepted);
+  assert.equal(writes, 1);
+  assert.equal(Object.keys(ui.store().snapshot().completions).length, 0);
+});
+
+for (const outcome of ['success', 'failure']) test(`midnight refresh clears target drafts and ignores previous-date ${outcome}`, async () => {
+  const mutation = deferred();
+  let reads = 0, writes = 0;
+  const nextDay = openToday({ local_date: '2026-10-11', server_time: '2026-10-11T12:00:00Z',
+    occurrences: [targetOccurrence({ id: 'next-day', local_date: '2026-10-11', closes_at: '2026-10-12T00:00:00Z' })] });
+  const ui = await screen(async () => ++reads === 1 ? openToday({ occurrences: [targetOccurrence()] }) : nextDay,
+    undefined, undefined, undefined, () => { writes++; return mutation.promise; });
+  ui.input().props.onChangeText('5');
+  const press = ui.button('Save progress').props.onPress;
+  const pending = press();
+  await ui.list().onRefresh();
+  assert.equal(Object.keys(ui.store().snapshot().progressDrafts).length, 0);
+  const accepted = ui.store().snapshot();
+  await press();
+  if (outcome === 'success') mutation.resolve(targetOccurrence({ progress: 5, updated_at: '2026-10-10T12:01:00Z' }));
+  else mutation.reject(new ApiError('old failure', null, 'network_error'));
+  await pending;
+  assert.equal(ui.store().snapshot(), accepted);
+  assert.equal(writes, 1);
+  assert.equal(ui.input('next-day').props.value, '0');
+});
+
+test('sign-out clears target drafts immediately and late progress cannot restore them', async () => {
+  const mutation = deferred(), logout = deferred();
+  const ui = await screen(async () => openToday({ occurrences: [targetOccurrence()] }),
+    undefined, undefined, undefined, () => mutation.promise);
+  ui.input().props.onChangeText('9');
+  const pending = ui.button('Save progress').props.onPress();
+  ui.auth.signOut = () => logout.promise;
+  const signingOut = ui.sessions.signOut();
+  cleared(ui);
+  assert.equal(Object.keys(ui.store().snapshot().progressDrafts).length, 0);
+  mutation.resolve(targetOccurrence({ progress: 9, updated_at: '2026-10-10T12:01:00Z' }));
+  await pending;
+  cleared(ui);
+  logout.resolve({ error: null });
+  await signingOut;
 });
 
 test('Home links to Today and its route is protected for ready accounts only', () => {

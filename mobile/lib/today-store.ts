@@ -4,6 +4,7 @@ import type { SessionStore } from './session-store';
 
 type CompletionState = { pending: boolean; error: string | null; refreshRequired: boolean };
 type Operation = CompletionState & { context: number; clearErrorOnRefresh?: boolean };
+type Change = { kind: 'completion'; value: boolean } | { kind: 'progress'; value: number };
 type TodayState = {
   // Keep the server's date/timezone and occurrences together, including on failure.
   today: TodayResult | null;
@@ -11,8 +12,20 @@ type TodayState = {
   refreshing: boolean;
   error: string | null;
   completions: Record<string, CompletionState>;
+  progressDrafts: Record<string, string>;
 };
-const emptyState = (): TodayState => ({ today: null, loading: false, refreshing: false, error: null, completions: {} });
+const emptyState = (): TodayState => ({ today: null, loading: false, refreshing: false, error: null, completions: {}, progressDrafts: {} });
+
+/** JSON numbers must remain exact; never round a user's absolute assignment. */
+export function parseProgress(value: string): number {
+  const text = value.trim();
+  if (!/^[0-9]+$/.test(text)) throw new Error('Progress must be a nonnegative whole number.');
+  const progress = Number(text);
+  if (!Number.isSafeInteger(progress)) {
+    throw new Error('Progress must be 9,007,199,254,740,991 or less so the app can save it exactly.');
+  }
+  return progress;
+}
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
@@ -51,6 +64,7 @@ export class TodayStore {
     private sessions: Pick<SessionStore, 'snapshot' | 'subscribe'>,
     private readToday: (session: Session) => Promise<TodayResult>,
     private writeCompletion: (session: Session, id: string, completed: boolean) => Promise<OccurrenceResult>,
+    private writeProgress: (session: Session, id: string, progress: number) => Promise<OccurrenceResult>,
     private now: () => number = () => performance.now(),
   ) {}
   snapshot = () => this.state;
@@ -80,20 +94,35 @@ export class TodayStore {
     // from read dispatch is conservative about time spent in transit.
     return this.clock ? this.clock.server + Math.max(0, this.now() - this.clock.started) : NaN;
   }
-  completionAction = (item: OccurrenceResult): boolean | null => {
+  private editable(item: OccurrenceResult): boolean {
     const today = this.state.today;
-    if (!this.currentSession() || !today?.occurrences.includes(item) || item.local_date !== today.local_date
-      || item.owner_id !== this.session?.user.id || item.snapshot.type !== 'binary'
-      || !(this.serverNow() < Date.parse(item.closes_at))) return null;
+    return !!this.currentSession() && !!today?.occurrences.includes(item) && item.local_date === today.local_date
+      && item.owner_id === this.session?.user.id && this.serverNow() < Date.parse(item.closes_at)
+      && ((item.state === 'in_progress' && !item.completed) || (item.state === 'completed' && item.completed));
+  }
+  completionAction = (item: OccurrenceResult): boolean | null => {
+    if (!this.editable(item) || item.snapshot.type !== 'binary') return null;
     if (item.state === 'in_progress' && !item.completed) return true;
     if (item.state === 'completed' && item.completed) return false;
     return null;
+  };
+  canSetProgress = (item: OccurrenceResult): boolean => this.editable(item) && item.snapshot.type === 'target';
+  progressValue = (item: OccurrenceResult): string => this.state.progressDrafts[item.id]
+    ?? (Number.isSafeInteger(item.progress) ? String(item.progress) : '');
+  setProgressDraft = (item: OccurrenceResult, value: string) => {
+    if (!this.canSetProgress(item)) return;
+    const key = this.key(item.owner_id, item.id);
+    const operation = this.operations.get(key);
+    if (operation?.pending || operation?.refreshRequired) return;
+    this.operations.delete(key);
+    this.publish({ ...this.state, progressDrafts: { ...this.state.progressDrafts, [item.id]: value },
+      completions: this.completionStates() });
   };
   private scheduleDeadline() {
     clearTimeout(this.deadlineTimer);
     this.deadlineTimer = undefined;
     const deadlines = (this.state.today?.occurrences ?? [])
-      .filter(item => this.completionAction(item) !== null).map(item => Date.parse(item.closes_at));
+      .filter(item => this.editable(item)).map(item => Date.parse(item.closes_at));
     if (!deadlines.length) return;
     const delay = Math.min(2_147_483_647, Math.max(1, Math.min(...deadlines) - this.serverNow()));
     // Only hide expired actions; never infer occurrence states locally.
@@ -143,7 +172,8 @@ export class TodayStore {
       const today = await this.readToday(session);
       if (!isCurrent()) return;
       if (today.occurrences.some(occurrence => occurrence.owner_id !== session.user.id)) throw new Error('Occurrence owner mismatch');
-      if (this.state.today && (today.local_date !== this.state.today.local_date || today.timezone !== this.state.today.timezone)) this.context++;
+      const changedDate = this.state.today && (today.local_date !== this.state.today.local_date || today.timezone !== this.state.today.timezone);
+      if (changedDate) this.context++;
       this.clock = { server: Date.parse(today.server_time), started };
       for (const item of today.occurrences) {
         const key = this.key(session.user.id, item.id);
@@ -154,7 +184,10 @@ export class TodayStore {
           else this.operations.set(key, { ...operation, refreshRequired: false });
         }
       }
-      this.publish({ today, loading: false, refreshing: false, error: null, completions: this.completionStates(today) });
+      const progressDrafts = changedDate ? {} : Object.fromEntries(today.occurrences
+        .filter(item => this.state.progressDrafts[item.id] !== undefined)
+        .map(item => [item.id, this.state.progressDrafts[item.id]]));
+      this.publish({ today, loading: false, refreshing: false, error: null, completions: this.completionStates(today), progressDrafts });
     } catch (error) {
       if (!isCurrent()) return;
       this.publish({ ...this.state, loading: false, refreshing: false, error: errorMessage(error) });
@@ -167,9 +200,28 @@ export class TodayStore {
     await this.reload();
   };
 
-  setCompletion = async (item: OccurrenceResult, completed: boolean) => {
+  setCompletion = (item: OccurrenceResult, completed: boolean) => this.change(item, { kind: 'completion', value: completed });
+
+  setProgress = async (item: OccurrenceResult) => {
+    if (!this.canSetProgress(item)) return;
+    const key = this.key(item.owner_id, item.id);
+    const previous = this.operations.get(key);
+    if (previous?.pending || previous?.refreshRequired) return;
+    let progress: number;
+    try {
+      progress = parseProgress(this.progressValue(item));
+    } catch (error) {
+      this.operations.set(key, { context: this.context, pending: false, refreshRequired: false,
+        error: error instanceof Error ? error.message : 'Enter a nonnegative whole number.' });
+      this.publish({ ...this.state, completions: this.completionStates() });
+      return;
+    }
+    await this.change(item, { kind: 'progress', value: progress });
+  };
+
+  private change = async (item: OccurrenceResult, change: Change) => {
     const session = this.currentSession();
-    if (!session || this.completionAction(item) !== completed) return;
+    if (!session || (change.kind === 'completion' ? this.completionAction(item) !== change.value : !this.canSetProgress(item))) return;
     const key = this.key(session.user.id, item.id);
     const previous = this.operations.get(key);
     if (previous?.pending || previous?.refreshRequired) return;
@@ -189,22 +241,27 @@ export class TodayStore {
     };
     let refresh = false;
     try {
-      const result = await this.writeCompletion(session, item.id, completed);
+      const result = await (change.kind === 'completion' ? this.writeCompletion(session, item.id, change.value)
+        : this.writeProgress(session, item.id, change.value));
       if (!isCurrent()) { ignoreStale(); return; }
+      const completed = change.kind === 'completion' ? change.value : item.snapshot.type === 'target' && change.value >= item.snapshot.target;
       if (result?.id !== item.id || result.owner_id !== session.user.id || result.habit_id !== item.habit_id
         || result.local_date !== item.local_date || result.timezone !== item.timezone || result.closes_at !== item.closes_at
-        || result.snapshot?.type !== 'binary' || result.completed !== completed
+        || result.snapshot?.type !== item.snapshot.type || result.snapshot.target !== item.snapshot.target || result.snapshot.unit !== item.snapshot.unit
+        || (change.kind === 'progress' && result.progress !== change.value) || result.completed !== completed
         || result.state !== (completed ? 'completed' : 'in_progress') || !Number.isFinite(Date.parse(result.updated_at))) {
-        throw new ApiError('Unexpected completion response', 200, 'invalid_response');
+        throw new ApiError('Unexpected occurrence response', 200, 'invalid_response');
       }
       // Invalidate reads dispatched before acknowledgement, including reads started
       // during the write. The following refresh gets a new revision.
       this.readRevision++;
       this.operations.delete(key);
       const today = this.state.today!;
+      const progressDrafts = { ...this.state.progressDrafts };
+      if (change.kind === 'progress') delete progressDrafts[item.id];
       this.publish({ ...this.state, today: { ...today, occurrences: today.occurrences.map(row =>
         row.id === item.id && atLeastAsRecent(result.updated_at, row.updated_at) ? result : row) },
-        loading: false, refreshing: false, completions: this.completionStates() });
+        loading: false, refreshing: false, completions: this.completionStates(), progressDrafts });
       refresh = true;
     } catch (error) {
       if (!isCurrent()) { ignoreStale(); return; }
@@ -218,7 +275,7 @@ export class TodayStore {
         : code === 'occurrence_closed' ? 'This occurrence is closed. Its deadline has passed. Refresh Today to see its current state.'
         : code === 'occurrence_locked' ? 'This occurrence is locked by an excuse and cannot be changed. Refresh Today to see its current state.'
         : code === 'occurrence_not_found' ? 'This occurrence is no longer available. Refresh Today to check its current state.'
-        : code === 'wrong_occurrence_type' ? 'This occurrence does not support completion. Refresh Today to check its current state.'
+        : code === 'wrong_occurrence_type' ? 'This occurrence does not support this change. Refresh Today to check its current state.'
         : error instanceof ApiError && error.status === 401
           ? 'Unable to verify your session. Retry, or return Home to sign out and sign in again.'
         : 'Unable to change this occurrence. Please try again.';

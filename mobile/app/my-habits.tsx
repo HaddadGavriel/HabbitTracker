@@ -60,16 +60,20 @@ export default function MyHabits() {
         <Text style={styles.message}>{habitType(item)}</Text>
         <Text style={styles.message}>Schedule: {habitSchedule(item)}</Text>
       </>;
-      return status === 'active'
-        ? <Link href={{ pathname: '/edit-habit', params: { id: item.id } }} asChild><Pressable style={localStyles.card} accessibilityRole="button" accessibilityLabel={`Edit ${item.name}`}>
+      return <View style={localStyles.card}>
+        {status === 'active'
+        ? <Link href={{ pathname: '/edit-habit', params: { id: item.id } }} asChild><Pressable style={localStyles.details} accessibilityRole="button" accessibilityLabel={`Edit ${item.name}`}>
           {details}
         </Pressable></Link>
-        : <View style={localStyles.card}>
+        : <>
           {details}
           {restoringId === item.id && <ActivityIndicator accessibilityLabel={`Restoring ${item.name}`} />}
           <Button title={restoringId === item.id ? 'Restoring…' : 'Restore'} accessibilityLabel={`Restore ${item.name}`}
             onPress={() => store.requestRestore(item)} disabled={restoreDisabled} />
-        </View>;
+        </>}
+        <Link href={{ pathname: '/habit-history', params: { id: item.id } }} style={styles.message}
+          accessibilityLabel={`View history for ${item.name}`}>View history</Link>
+      </View>;
     }}
   />;
 }
@@ -81,4 +85,5 @@ const localStyles = StyleSheet.create({
   filter: { padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#b8c4d8' },
   selectedFilter: { backgroundColor: '#dbeafe', borderColor: '#2563eb' },
   card: { padding: 16, gap: 8, borderRadius: 8, backgroundColor: 'white' },
+  details: { gap: 8 },
 });
