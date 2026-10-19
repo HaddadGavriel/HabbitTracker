@@ -1,4 +1,5 @@
 import type { Session } from '@supabase/supabase-js';
+import { usernameInput } from './username-input';
 
 const apiUrl = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '');
 
@@ -42,7 +43,7 @@ function httpError(body: unknown, status: number, session: Session): ApiError {
   return new ApiError(fallback, status, `http_${status}`);
 }
 
-async function request<T>(path: string, session: Session, init: RequestInit): Promise<T> {
+async function request<T>(path: string, session: Session, init: RequestInit, responseType: 'json' | 'empty' = 'json'): Promise<T> {
   if (!apiUrl) throw new ApiError('Missing EXPO_PUBLIC_API_URL', null, 'configuration_error');
   const controller = new AbortController();
   let status: number | null = null;
@@ -61,6 +62,12 @@ async function request<T>(path: string, session: Session, init: RequestInit): Pr
         signal: controller.signal,
       });
       status = response.status;
+      // Only endpoints whose contract is 204 may complete without JSON. An
+      // unexpected success response is ambiguous and must be reconciled by callers.
+      if (response.ok && responseType === 'empty') {
+        if (response.status === 204) return undefined as T;
+        throw new ApiError('API returned an unexpected response', response.status, 'invalid_response');
+      }
       const body: unknown = await response.json().catch(() => undefined);
       if (!response.ok) throw httpError(body, response.status, session);
       if (body === undefined) throw new ApiError('API returned an invalid JSON response', response.status, 'invalid_response');
@@ -84,6 +91,54 @@ export const readProfile = (session: Session) =>
 
 export const createProfile = (session: Session, profile: ProfileCreate) =>
   request<ProfileResult>('/profiles/me', session, { method: 'POST', body: JSON.stringify(profile) });
+
+/** Search and relationships expose only this public identity, never full profiles. */
+export type PublicProfile = { user_id: string; username: string; display_name: string };
+
+/** Exact username lookup only; normalization matches backend ProfileFields. */
+export async function searchProfile(session: Session, username: string): Promise<PublicProfile> {
+  let normalized: string;
+  try {
+    normalized = usernameInput(username);
+  } catch {
+    throw new ApiError('Username must be 3–30 ASCII letters, digits, or underscores.', null, 'invalid_username');
+  }
+  return request<PublicProfile>(`/profiles/search?username=${encodeURIComponent(normalized)}`, session, { method: 'GET' });
+}
+
+export type RelationshipResult = {
+  id: string;
+  direction: 'incoming' | 'outgoing';
+  state: 'pending' | 'accepted';
+  profile: PublicProfile;
+  created_at: string;
+  updated_at: string;
+  accepted_at: string | null;
+};
+
+export type FriendRequestLists = { incoming: RelationshipResult[]; outgoing: RelationshipResult[] };
+
+export const listFriends = (session: Session) =>
+  request<RelationshipResult[]>('/friends', session, { method: 'GET' });
+
+export const listFriendRequests = (session: Session) =>
+  request<FriendRequestLists>('/friend-requests', session, { method: 'GET' });
+
+/** The backend derives the sender from the bearer token. */
+export const sendFriendRequest = (session: Session, recipientUserId: string) =>
+  request<RelationshipResult>('/friend-requests', session, {
+    method: 'POST', body: JSON.stringify({ recipient_user_id: recipientUserId }),
+  });
+
+export const acceptFriendRequest = (session: Session, requestId: string) =>
+  request<RelationshipResult>(`/friend-requests/${encodeURIComponent(requestId)}/accept`, session, { method: 'POST' });
+
+export const rejectFriendRequest = (session: Session, requestId: string): Promise<void> =>
+  request<void>(`/friend-requests/${encodeURIComponent(requestId)}/reject`, session, { method: 'POST' }, 'empty');
+
+/** Removing a friendship also deletes both directions' habit sharing grants. */
+export const removeFriend = (session: Session, friendUserId: string): Promise<void> =>
+  request<void>(`/friends/${encodeURIComponent(friendUserId)}`, session, { method: 'DELETE' }, 'empty');
 
 /** Weekdays use ISO numbering: Monday = 1, Sunday = 7; daily schedules return []. */
 export type HabitWeekday = 1 | 2 | 3 | 4 | 5 | 6 | 7;
