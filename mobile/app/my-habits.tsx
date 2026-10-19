@@ -73,6 +73,8 @@ export default function MyHabits() {
         </>}
         <Link href={{ pathname: '/habit-history', params: { id: item.id } }} style={styles.message}
           accessibilityLabel={`View history for ${item.name}`}>View history</Link>
+        <Link href={{ pathname: '/manage-sharing', params: { id: item.id } }} style={styles.message}
+          accessibilityLabel={`Manage sharing for ${item.name}`}>Manage sharing</Link>
       </View>;
     }}
   />;
