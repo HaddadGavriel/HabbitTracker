@@ -3,8 +3,9 @@
 Owners can read paginated occurrence history and the current streak for their own
 habits, including archived habits. Currently authorized shared friends receive the
 same streak fields in shared-habit views. Friends cannot use either owner endpoint,
-even when the habit is shared with them. This feature adds no reminders, mobile UI,
-longest streak, or advanced analytics.
+even when the habit is shared with them. The mobile [owner history](mobile-history-walkthrough.md)
+and [shared views](mobile-sharing-walkthrough.md) consume these server-calculated
+streaks. This feature adds no reminders, longest streak, or advanced analytics.
 
 ## HTTP contracts
 

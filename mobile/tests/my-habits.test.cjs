@@ -90,7 +90,7 @@ test('My habits renders Active as the selected backend filter and retains creati
   assert.equal(ui.button('Restore'), undefined);
 });
 
-test('active and archived owned cards link directly to their own history without restoring', async () => {
+test('active and archived owned cards link directly to history and sharing without restoring', async () => {
   let restores = 0;
   const ui = await screen(async (_session, status) => status === 'active'
     ? [habit({ id: 'active-id', name: 'Active habit' })]
@@ -106,6 +106,11 @@ test('active and archived owned cards link directly to their own history without
     assert.equal(links[0].props.href.params.id, `${status}-id`);
     assert.equal(links[0].props.accessibilityLabel, `View history for ${status === 'active' ? 'Active' : 'Archived'} habit`);
     assert.equal(text(links[0]), 'View history');
+    const sharing = ui.render().filter(node => node.type === 'Link' && node.props.href.pathname === '/manage-sharing');
+    assert.equal(sharing.length, 1);
+    assert.equal(sharing[0].props.href.params.id, `${status}-id`);
+    assert.equal(sharing[0].props.accessibilityLabel, `Manage sharing for ${status === 'active' ? 'Active' : 'Archived'} habit`);
+    assert.equal(text(sharing[0]), 'Manage sharing');
     assert.equal(ui.button('Confirm restore'), undefined);
     assert.equal(restores, 0);
   }

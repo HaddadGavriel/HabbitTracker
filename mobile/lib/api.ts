@@ -240,6 +240,39 @@ export const readHabitHistory = (session: Session, id: string, cursor?: string |
 export const readHabitStreak = (session: Session, id: string): Promise<StreakResult> =>
   request<StreakResult>(`/habits/${encodeURIComponent(id)}/streak`, session, { method: 'GET' });
 
+/** Sharing exposes public identities only and never follows from friendship alone. */
+export const listHabitShares = (session: Session, id: string) =>
+  request<PublicProfile[]>(`/habits/${encodeURIComponent(id)}/shares`, session, { method: 'GET' });
+
+/** Explicit grants also work for archived owned habits. The actor is the bearer. */
+export const grantHabitShare = (session: Session, id: string, friendUserId: string) =>
+  request<PublicProfile>(`/habits/${encodeURIComponent(id)}/shares/${encodeURIComponent(friendUserId)}`, session, { method: 'PUT' });
+
+export const revokeHabitShare = (session: Session, id: string, friendUserId: string): Promise<void> =>
+  request<void>(`/habits/${encodeURIComponent(id)}/shares/${encodeURIComponent(friendUserId)}`, session, { method: 'DELETE' }, 'empty');
+
+export type SharedOccurrence = Pick<OccurrenceResult,
+  'id' | 'local_date' | 'timezone' | 'closes_at' | 'snapshot' | 'progress' | 'completed' | 'state'>;
+
+/** Each entry has its own owner's Today; current configuration may differ from its snapshot. */
+export type SharedHabitResult = {
+  id: string;
+  owner: PublicProfile;
+  configuration: HabitSnapshot;
+  local_date: string;
+  timezone: string;
+  server_time: string;
+  due_today: boolean;
+  occurrence: SharedOccurrence | null;
+} & Pick<StreakResult, 'current_streak' | 'provisional' | 'calculated_at'>;
+
+/** Recipients get streaks here; owner history/streak endpoints are never needed. */
+export const listSharedHabits = (session: Session) =>
+  request<SharedHabitResult[]>('/shared-habits', session, { method: 'GET' });
+
+export const readSharedHabit = (session: Session, id: string) =>
+  request<SharedHabitResult>(`/shared-habits/${encodeURIComponent(id)}`, session, { method: 'GET' });
+
 /** Owner identity and timestamps are server-managed; binary payloads omit target/unit. */
 export type HabitCreate = {
   name: string;

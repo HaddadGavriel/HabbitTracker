@@ -301,7 +301,7 @@ test('initial loading, empty state, failure, retry, and pull refresh render hone
   assert.match(retained.text(), /Bob @bob_2/);
 });
 
-test('the actual Home links to Friends and the actual route tree protects Friends through every session status', () => {
+test('Home links to Friends and shared habits; friendship and sharing routes require a ready session', () => {
   let state;
   const Stack = { Protected: 'Protected', Screen: 'Screen' };
   const dependencies = {
@@ -319,14 +319,17 @@ test('the actual Home links to Friends and the actual route tree protects Friend
   for (const status of ['startup', 'loading', 'signed_out', 'profile_required', 'failure', 'ready']) {
     state = { status, session: status === 'signed_out' ? null : session(), profile: status === 'ready' ? fullProfile(alice) : null, store: { signOut() {} } };
     const tree = Layout();
-    const groups = nodes(tree).filter(node => node.type === 'Protected'
-      && nodes(node.props.children).some(child => child.type === 'Screen' && child.props.name === 'friends'));
-    assert.equal(groups.length, 1);
-    assert.equal(groups[0].props.guard, status === 'ready', `Friends access for ${status}`);
-    assert.equal(nodes(tree).filter(node => node.type === 'Screen' && node.props.name === 'friends').length, 1);
+    for (const route of ['friends', 'manage-sharing', 'shared-habits', 'shared-habit']) {
+      const groups = nodes(tree).filter(node => node.type === 'Protected'
+        && nodes(node.props.children).some(child => child.type === 'Screen' && child.props.name === route));
+      assert.equal(groups.length, 1);
+      assert.equal(groups[0].props.guard, status === 'ready', `${route} access for ${status}`);
+      assert.equal(nodes(tree).filter(node => node.type === 'Screen' && node.props.name === route).length, 1);
+    }
   }
   const home = nodes(Home());
   assert.equal(home.filter(node => node.type === 'Link' && node.props.href === '/friends' && text(node) === 'Friends').length, 1);
+  assert.equal(home.filter(node => node.type === 'Link' && node.props.href === '/shared-habits' && text(node) === 'Friends’ habits').length, 1);
   const aliceKey = Layout().key;
   state = { ...state, session: session(bob), profile: fullProfile(bob) };
   assert.notEqual(Layout().key, aliceKey, 'Account switches remount the protected stack');

@@ -12,8 +12,10 @@ change progress. A currently authorized friend can also read and decide an
 [occurrence excuse](excuses.md) through its dedicated endpoints. Shared views
 include [current streaks](history.md), while full occurrence history remains
 owner-only. A currently authorized friend can [request a push reminder](reminders.md)
-for an open incomplete occurrence due Today. Scheduled notifications and mobile
-changes remain deferred.
+for an open incomplete occurrence due Today. Mobile owners can manage individual
+grants from active or archived habits, and recipients can open read-only
+**Friends’ habits** from Home; see the [mobile sharing walkthrough](mobile-sharing-walkthrough.md).
+Mobile excuse actions and reminder buttons, and scheduled notifications, remain deferred.
 
 ## Endpoints and errors
 
