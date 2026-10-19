@@ -10,10 +10,15 @@ const ts = require('typescript');
 const source = ts.transpileModule(readFileSync(join(__dirname, '../lib/api.ts'), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
+const usernameInput = {};
+vm.runInNewContext(ts.transpileModule(readFileSync(join(__dirname, '../lib/username-input.ts'), 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText, { exports: usernameInput });
 function client(fetch, env = { EXPO_PUBLIC_API_URL: 'https://api.example.test/' }) {
   const exports = {};
   vm.runInNewContext(source, {
     exports, process: { env }, fetch, AbortController,
+    require: name => name === './username-input' ? usernameInput : assert.fail(`Unexpected dependency: ${name}`),
     setTimeout: (...args) => setTimeout(...args), clearTimeout: (...args) => clearTimeout(...args),
   });
   return exports;
