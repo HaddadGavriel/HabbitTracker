@@ -27,7 +27,10 @@ function InfrastructureScreen() {
 
   useEffect(() => {
     const notification = Notifications.addNotificationReceivedListener((item) => {
-      setReceivedRequestId(String(item.request.content.data?.request_id ?? 'unknown'));
+      const data = item.request.content.data;
+      if (data?.type === undefined && typeof data?.request_id === 'string' && /^[A-Za-z0-9_-]{8,100}$/.test(data.request_id)) {
+        setReceivedRequestId(data.request_id);
+      }
     });
     alive.current = true;
     return () => { alive.current = false; notification.remove(); };

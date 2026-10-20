@@ -133,6 +133,18 @@ its contents through this backend. An already transmitted older detailed push
 cannot be retroactively changed. Android channels additionally request private
 lock-screen visibility. Tokens and provider errors are never ordinary UI content.
 
+## Reminder taps
+
+The [two-device reminder walkthrough](mobile-reminders-walkthrough.md) covers
+sending and foreground/background/cold-start taps. Generic current pushes fetch
+current authorized Today before opening it. Legacy structured payloads validate
+UUIDs and fetch current owned habit/Today/history data; deleted or wrong-account
+references fall back safely. The tap handler waits for authentication/onboarding
+and Router readiness, binds pending work to an account, and persistently deduplicates
+handled taps. It never follows payload URLs. Infrastructure taps remain separate
+and never trigger a send. Generic push content and registration cleanup behavior
+are unchanged.
+
 ## Verification
 
 Run `npm test` and `npm run typecheck` in `mobile/`, and `python -m pytest -q` in

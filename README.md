@@ -20,6 +20,7 @@ The secret key exists only on the backend. PostgreSQL tables have RLS enabled an
 * `mobile/` — Expo SDK 57 / Expo Router React Native TypeScript app.
 * `backend/` — structured FastAPI service, external-service adapters, and tests.
 * `supabase/migrations/` — source-controlled PostgreSQL schema.
+* `docs/mobile-reminders-walkthrough.md` — two-device reminder sending, durable request recovery, and safe notification taps.
 * `docs/android-push-setup.md` — Firebase, FCM, EAS build, installation, and verification walkthrough.
 * `render.yaml` — Render Blueprint.
 

@@ -93,6 +93,7 @@ async function screen({ mode = 'list', id = habitId, api = {}, readProfile = asy
     'react-native': { ...native, AppState: appState },
     '../components/form': form,
     '../components/shared-habit-view': view,
+    '../components/reminder-controls': { ReminderControls: 'ReminderControls' },
     '../lib/api': mockedAPI,
     '../lib/shared-habits-store': { SharedHabitsStore },
     '../lib/session': { useSession: () => ({ ...sessions.snapshot(), store: sessions }) },
@@ -310,6 +311,7 @@ test('normal navigation reaches the shared list and both shared routes require a
   const modules = {
     'react/jsx-runtime': runtime, 'expo-router': { Link: 'Link', Stack }, 'react-native': native,
     'expo-notifications': { setNotificationHandler() {} },
+    '../components/notification-tap-gate': { NotificationTapGate: 'NotificationTapGate' },
     '../lib/notification-runtime': { notificationService: { canPresent: () => false } }, '../components/form': form,
     '../lib/session-store': { routeAccess },
     '../lib/auth-link-context': { AuthLinkProvider: props => props.children, useAuthLink: () => ({ phase: 'idle' }) },
@@ -328,9 +330,9 @@ test('normal navigation reaches the shared list and both shared routes require a
       assert.equal(groups[0].props.guard, status === 'ready', `${route} for ${status}`);
     }
   }
-  const before = Layout().key;
+  const before = nodes(Layout()).find(node => node.type === Stack).key;
   state = { ...state, status: 'ready', session: session('recipient-b'), profile: profile('recipient-b') };
-  assert.notEqual(Layout().key, before, 'Switching accounts remounts the protected stack');
+  assert.notEqual(nodes(Layout()).find(node => node.type === Stack).key, before, 'Switching accounts remounts the protected stack');
 });
 
 
