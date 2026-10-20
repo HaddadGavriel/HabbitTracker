@@ -107,6 +107,9 @@ async function screen(readToday, readProfile = async s => profile(s.user.id), in
     'react-native': { AppState, ActivityIndicator: 'ActivityIndicator', Button: 'Button', FlatList: 'FlatList',
       Text: 'Text', TextInput: 'TextInput', View: 'View', StyleSheet: { create: value => value } },
     '../components/form': { styles: {} },
+    '../components/excuse-view': compile('components/excuse-view.tsx', name => name === 'react/jsx-runtime' ? runtime
+      : name === 'react-native' ? { Text: 'Text', View: 'View' } : { styles: {} }),
+    '../lib/excuse-input': lib('excuse-input'),
     '../lib/api': { readToday, setOccurrenceCompletion, setOccurrenceProgress },
     '../lib/today-store': { TodayStore },
     '../lib/session': { useSession: () => ({ store: sessions }) },
@@ -182,7 +185,8 @@ test('cards preserve order, snapshots, all five states, over-target progress and
   assert.deepEqual(ui.texts().filter(value => value.startsWith('Progress:')), ['Progress: 13 / 10 pages', 'Progress: 0 / 5']);
   assert.equal(ui.texts().filter(value => value === 'Binary').length, 5);
   assert.equal(ui.texts().filter(value => value === 'Target').length, 2);
-  assert.ok(!ui.render().some(node => ['Button', 'Pressable', 'TextInput', 'Link'].includes(node.type)));
+  assert.ok(!ui.render().some(node => ['Pressable', 'TextInput', 'Link'].includes(node.type)
+    || (node.type === 'Button' && node.props.title !== 'View excuse')));
 });
 
 test('successful empty response displays its server date/timezone and an empty message', async () => {
@@ -464,10 +468,10 @@ test('eligibility uses original deadline and server time for both habit types, l
   assert.equal(rows[0].timezone, 'Asia/Tokyo');
   for (const item of rows.slice(2)) {
     if (item.snapshot.type === 'target') assert.ok(ui.button('Save progress', item.id));
-    else assert.ok(!ui.row(item.id).some(node => node.type === 'Button'), `${item.id} must be read-only`);
+    else assert.ok(!ui.row(item.id).some(node => node.type === 'Button' && node.props.title !== 'View excuse'), `${item.id} must be read-only`);
     await ui.store().setCompletion(item, item.state !== 'completed');
   }
-  assert.equal(ui.render().filter(node => node.type === 'Button').length, 4);
+  assert.equal(ui.render().filter(node => node.type === 'Button' && !['View excuse', 'Submit excuse'].includes(node.props.title)).length, 4);
 });
 
 test('deadline timer hides actions at the exact server deadline and rejects an already captured control', async () => {

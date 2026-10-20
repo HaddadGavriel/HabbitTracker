@@ -62,7 +62,10 @@ const view = compile('components/shared-habit-view.tsx', name => {
 });
 async function screen({ mode = 'list', id = habitId, api = {}, readProfile = async s => profile(s.user.id) } = {}) {
   let authEvent, store, focus, cleanup, detailKey;
-  const calls = [], navigation = [];
+  const calls = [], navigation = [], appStateListeners = new Set();
+  const appState = { currentState: 'active', addEventListener: (_event, callback) => {
+    appStateListeners.add(callback); return { remove: () => appStateListeners.delete(callback) };
+  } };
   const auth = {
     getSession: async () => ({ data: { session: session() } }),
     onAuthStateChange: callback => { authEvent = callback; return { data: { subscription: { unsubscribe() {} } } }; },
@@ -87,7 +90,7 @@ async function screen({ mode = 'list', id = habitId, api = {}, readProfile = asy
     react: { useCallback: fn => fn, useState: initial => [store ??= initial()], useSyncExternalStore: (_subscribe, snapshot) => snapshot() },
     'expo-router': { Link: 'Link', useFocusEffect: callback => { focus = callback; }, useLocalSearchParams: () => ({ id }),
       router: { dismissTo: target => navigation.push(target) } },
-    'react-native': native,
+    'react-native': { ...native, AppState: appState },
     '../components/form': form,
     '../components/shared-habit-view': view,
     '../lib/api': mockedAPI,
@@ -118,6 +121,7 @@ async function screen({ mode = 'list', id = habitId, api = {}, readProfile = asy
       assert.ok(!button.props.disabled, `Disabled button: ${title}`);
       return button.props.onPress();
     },
+    appState: next => { appState.currentState = next; appStateListeners.forEach(callback => callback(next)); },
     event: value => authEvent(value ? 'SIGNED_IN' : 'SIGNED_OUT', value),
     leave: () => cleanup?.(),
     focus: () => { cleanup = focus?.(); },
@@ -129,7 +133,7 @@ const count = (ui, name) => ui.calls.filter(call => call.name === name).length;
 function noOwnerControls(ui) {
   for (const node of ui.render()) {
     if (node.type === 'Button') assert.match(node.props.title, /^(Refresh|Retry loading|Back to Friends’ habits)$/);
-    if (node.type === 'Link') assert.ok(['/home', '/friends', '/shared-habit'].includes(
+    if (node.type === 'Link') assert.ok(['/home', '/friends', '/shared-habit', '/pending-excuses', '/excuse-detail'].includes(
       typeof node.props.href === 'string' ? node.props.href : node.props.href.pathname));
     assert.ok(!['TextInput', 'Field'].includes(node.type));
   }
@@ -312,9 +316,10 @@ test('normal navigation reaches the shared list and both shared routes require a
   const load = path => compile(path, name => { assert.ok(modules[name], `Unexpected navigation dependency: ${name}`); return modules[name]; }).default;
   const Home = load('app/home.tsx'), Layout = load('app/_layout.tsx');
   assert.ok(nodes(Home()).some(node => node.type === 'Link' && node.props.href === '/shared-habits' && text(node) === 'Friends’ habits'));
+  assert.ok(nodes(Home()).some(node => node.type === 'Link' && node.props.href === '/pending-excuses'));
   for (const status of ['ready', 'startup', 'loading', 'signed_out', 'profile_required', 'failure']) {
     state = { ...state, status };
-    for (const route of ['shared-habits', 'shared-habit']) {
+    for (const route of ['shared-habits', 'shared-habit', 'pending-excuses', 'excuse-detail']) {
       const groups = nodes(Layout()).filter(node => node.type === 'Protected'
         && nodes(node.props.children).some(child => child.type === 'Screen' && child.props.name === route));
       assert.equal(groups.length, 1);
@@ -324,4 +329,31 @@ test('normal navigation reaches the shared list and both shared routes require a
   const before = Layout().key;
   state = { ...state, status: 'ready', session: session('recipient-b'), profile: profile('recipient-b') };
   assert.notEqual(Layout().key, before, 'Switching accounts remounts the protected stack');
+});
+
+
+test('shared detail links the stored occurrence to its excuse only while authorization is current', async () => {
+  let denied = false;
+  const ui = await screen({ mode: 'detail', api: { readSharedHabit: async () => {
+    if (denied) throw new ApiError('Habit not found', 404, 'habit_not_found');
+    return shared({ occurrence: occurrence({ state: 'justification_pending', completed: false, progress: 3 }) });
+  } } });
+  const links = () => ui.render().filter(node => node.type === 'Link' && node.props.href.pathname === '/excuse-detail');
+  assert.equal(links().length, 1);
+  assert.equal(links()[0].props.href.params.occurrenceId, 'original-occurrence');
+  ui.appState('background');
+  assert.equal(links().length, 0);
+  assert.doesNotMatch(ui.text(), /Book Friend|Read chapter/);
+  denied = true;
+  ui.appState('active'); await flush();
+  assert.equal(count(ui, 'readSharedHabit'), 2);
+  assert.equal(links().length, 0);
+  assert.match(ui.text(), /no longer available/);
+  denied = false;
+  await ui.refresh();
+  assert.equal(links().length, 1);
+  const refresh = ui.refresh();
+  assert.equal(links().length, 0, 'A cached occurrence cannot link to a private explanation while rechecking access');
+  await refresh;
+  assert.equal(links().length, 1);
 });
