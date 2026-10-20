@@ -872,3 +872,37 @@ test('unregister sends only the exact intent ID with current account credentials
   assert.equal(call.init.headers.Authorization, 'Bearer current-access-secret');
   assert.deepEqual(JSON.parse(call.init.body), { registration_id: 'intent-id' });
 });
+
+test('reminder POST sends only an empty body and the caller-persisted key, never retries or replaces it', async () => {
+  const calls = [];
+  const api = client(async (url, init) => { calls.push({ url, init }); return json(503, { detail: { code: 'reminder_outcome_unavailable',
+    message: 'Check same request', reminder_id: 'CCCCCCCC-3333-4333-8333-333333333333' } }); });
+  for (let attempt = 0; attempt < 2; attempt++) await assert.rejects(api.requestReminder(session, 'habit/id', 'persisted-key'), error => {
+    assert.equal(error.reminder_id, 'cccccccc-3333-4333-8333-333333333333'); return true;
+  });
+  assert.equal(calls.length, 2);
+  for (const call of calls) {
+    assert.equal(call.url, 'https://api.example.test/shared-habits/habit%2Fid/reminders');
+    assert.equal(call.init.method, 'POST'); assert.equal(call.init.headers['Idempotency-Key'], 'persisted-key');
+    assert.equal(call.init.headers.Authorization, 'Bearer current-access-secret'); assert.equal(call.init.body, '{}');
+  }
+  await assert.rejects(api.requestReminder(session, 'id', 'invalid\nkey'));
+  assert.equal(calls.length, 2);
+});
+
+test('ApiError exposes only well-formed timestamp/UUID metadata and discards arbitrary details', async () => {
+  const api = client(async () => json(429, { detail: { code: 'reminder_cooldown', message: 'Wait',
+    retry_at: '2026-10-20T11:00:00.123456+00:00', reminder_id: 'cccccccc-3333-4333-8333-333333333333',
+    token: 'secret', devices: ['private'] } }));
+  await assert.rejects(api.requestReminder(session, 'id', 'key'), error => {
+    assert.equal(error.retry_at, '2026-10-20T11:00:00.123456+00:00');
+    assert.equal(error.reminder_id, 'cccccccc-3333-4333-8333-333333333333');
+    assert.equal(error.devices, undefined); assert.equal(error.token, undefined); return true;
+  });
+  for (const value of [null, 123, {}, [], 'Bearer current-access-secret', 'not-a-date', '2026-10-20']) {
+    const bad = client(async () => json(503, { detail: { code: 'reminder_unavailable', message: 'Check', retry_at: value, reminder_id: value } }));
+    await assert.rejects(bad.requestReminder(session, 'id', 'key'), error => {
+      assert.equal(error.retry_at, undefined); assert.equal(error.reminder_id, undefined); return true;
+    });
+  }
+});

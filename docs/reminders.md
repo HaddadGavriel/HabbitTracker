@@ -3,8 +3,9 @@
 A currently authorized friend can ask the backend to send a short Expo push
 notification to the owner of a shared habit. This is an explicit request, not a
 scheduler: `reminder_times` configuration does not send notifications. Mobile registration controls are in Settings; see [account-aware notification
-registration and cleanup](mobile-notifications.md). Friend-send screens, local
-scheduling, background resend, and receipt polling remain deferred.
+registration and cleanup](mobile-notifications.md). The [mobile reminder workflow](mobile-reminders-walkthrough.md)
+adds explicit sending, durable same-key recovery, and guarded notification taps.
+Local scheduling, background resend, and receipt polling remain deferred.
 
 ## HTTP contract
 
@@ -140,6 +141,23 @@ navigation identifiers at dispatch, including for detailed snapshots stored by
 older versions. This limits disclosure if a previously authorized push arrives
 after logout/account switching. Private database audit snapshots are not exposed
 to the device or public API. See the [delivery boundary](mobile-notifications.md#delivery-boundary-and-privacy).
+
+Generic current notification taps fetch the signed-in owner's authorized Today
+before navigation. Older already-transmitted notifications may still contain:
+
+```json
+{
+  "type": "habit_reminder",
+  "reminder_id": "8999444f-cdea-4377-8235-e12e08aebdb6",
+  "habit_id": "8cab1bce-89d6-44ea-9150-e774b49bd148",
+  "occurrence_id": "e235e79a-18d2-4d91-9391-bec860d662d9"
+}
+```
+
+The mobile client validates all three UUIDs and fetches current owner-authorized
+habit/Today/history data before following these legacy references. Archived or
+old-date owned habits use history; deleted, inaccessible, or wrong-account
+references fall back to Home. Payload URLs are never navigation authority.
 
 The backend makes no automatic resend after a timeout, transport interruption,
 5xx response, malformed provider response, or another ambiguous result. Some or

@@ -2,13 +2,19 @@ import type { Session } from '@supabase/supabase-js';
 import { usernameInput } from './username-input';
 import { explanationInput } from './excuse-input';
 
+export const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const isTimestamp = (value: unknown): value is string => typeof value === 'string'
+  && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+  && Number.isFinite(Date.parse(value));
+
 const apiUrl = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '');
 
 // Includes response-body reading. A timeout does not imply a mutation was rolled back.
 const requestTimeoutMs = 30_000;
 
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number | null, readonly code: string) {
+  constructor(message: string, readonly status: number | null, readonly code: string,
+    readonly retry_at?: string, readonly reminder_id?: string) {
     super(message);
     this.name = 'ApiError';
   }
@@ -39,7 +45,10 @@ function httpError(body: unknown, status: number, session: Session): ApiError {
       ? safeMessage(detail.code, session) : `http_${status}`;
     const message = 'message' in detail && typeof detail.message === 'string' && detail.message.trim()
       ? safeMessage(detail.message, session) : fallback;
-    return new ApiError(message, status, code);
+    const retryAt = 'retry_at' in detail && isTimestamp(detail.retry_at) ? detail.retry_at : undefined;
+    const reminderId = 'reminder_id' in detail && typeof detail.reminder_id === 'string' && uuidPattern.test(detail.reminder_id)
+      ? detail.reminder_id.toLowerCase() : undefined;
+    return new ApiError(message, status, code, retryAt, reminderId);
   }
   return new ApiError(fallback, status, `http_${status}`);
 }
@@ -367,3 +376,18 @@ export const runInfrastructureTest = (session: Session, requestId: string, clien
   request<TestResult>('/infrastructure-test', session, {
     method: 'POST', body: JSON.stringify({ request_id: requestId, client_started_at: clientStartedAt }),
   });
+
+export type ReminderResult = {
+  id: string; habit_id: string; occurrence_id: string;
+  status: 'provider_accepted' | 'partially_accepted' | 'failed' | 'unknown' | 'no_devices' | 'reserved';
+  reserved_at: string; finished_at: string | null; retry_at: string;
+  device_count: number; accepted_count: number; failed_count: number; unknown_count: number;
+};
+
+/** Reuse the caller's durable key; no automatic retry or replacement. */
+export async function requestReminder(session: Session, habitId: string, key: string): Promise<ReminderResult> {
+  if (!/^[A-Za-z0-9._:-]{1,128}$/.test(key)) throw new ApiError('Invalid reminder request key.', null, 'invalid_idempotency_key');
+  return request<ReminderResult>(`/shared-habits/${encodeURIComponent(habitId)}/reminders`, session, {
+    method: 'POST', headers: { 'Idempotency-Key': key }, body: '{}',
+  });
+}

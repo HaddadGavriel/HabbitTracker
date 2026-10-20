@@ -2,6 +2,7 @@ import { useCallback, useState, useSyncExternalStore } from 'react';
 import { Link, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { ActivityIndicator, AppState, Button, RefreshControl, ScrollView, Text } from 'react-native';
 import { Form, Message, styles } from '../components/form';
+import { ReminderControls } from '../components/reminder-controls';
 import { SharedHabitView } from '../components/shared-habit-view';
 import { listSharedHabits, readSharedHabit } from '../lib/api';
 import { SharedHabitsStore } from '../lib/shared-habits-store';
@@ -20,7 +21,7 @@ export default function SharedHabit() {
 function Detail({ id }: { id: string }) {
   const { store: sessions } = useSession();
   const [store] = useState(() => new SharedHabitsStore(sessions, { listSharedHabits, readSharedHabit }, id));
-  const { habit, loading, refreshing, error } = useSyncExternalStore(store.subscribe, store.snapshot);
+  const { habit, observedAt, loading, refreshing, error } = useSyncExternalStore(store.subscribe, store.snapshot);
   useFocusEffect(useCallback(() => {
     if (AppState.currentState !== 'background' && AppState.currentState !== 'inactive') store.start();
     const subscription = AppState.addEventListener('change', next => { if (next === 'active') store.start(); else store.stop(); });
@@ -40,7 +41,7 @@ function Detail({ id }: { id: string }) {
       <Text accessibilityLiveRegion="polite" style={styles.message}>{error}</Text>
       <Button title="Retry loading" onPress={store.refresh} disabled={busy} />
     </>}
-    {habit && <SharedHabitView habit={habit} />}
+    {habit && <><SharedHabitView habit={habit} /><ReminderControls habit={habit} observedAt={observedAt} /></>}
     {habit?.occurrence && ['justification_pending', 'excused', 'missed'].includes(habit.occurrence.state) && <>
       <Link href={{ pathname: '/excuse-detail', params: { occurrenceId: habit.occurrence.id } }} style={styles.message}>{habit.occurrence.state === 'missed' ? 'View excuse, if submitted' : 'View excuse'}</Link>
       {habit.occurrence.state === 'missed' && <Text style={styles.message}>Missed occurrences may have no excuse.</Text>}

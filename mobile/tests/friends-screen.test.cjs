@@ -308,6 +308,7 @@ test('Home links to Friends and shared habits; friendship and sharing routes req
     'react/jsx-runtime': { jsx, jsxs: jsx },
     'expo-router': { Stack, Link: 'Link' },
     'expo-notifications': { setNotificationHandler() {} },
+    '../components/notification-tap-gate': { NotificationTapGate: 'NotificationTapGate' },
     '../lib/notification-runtime': { notificationService: { canPresent: () => false } },
     'react-native': { Button: 'Button', Text: 'Text' },
     '../components/form': { Form: 'Form', styles: {} },
@@ -332,9 +333,9 @@ test('Home links to Friends and shared habits; friendship and sharing routes req
   const home = nodes(Home());
   assert.equal(home.filter(node => node.type === 'Link' && node.props.href === '/friends' && text(node) === 'Friends').length, 1);
   assert.equal(home.filter(node => node.type === 'Link' && node.props.href === '/shared-habits' && text(node) === 'Friends’ habits').length, 1);
-  const aliceKey = Layout().key;
+  const aliceKey = nodes(Layout()).find(node => node.type === Stack).key;
   state = { ...state, session: session(bob), profile: fullProfile(bob) };
-  assert.notEqual(Layout().key, aliceKey, 'Account switches remount the protected stack');
+  assert.notEqual(nodes(Layout()).find(node => node.type === Stack).key, aliceKey, 'Account switches remount the protected stack');
 });
 
 test('screen focus fetches both lists again and rejects old search and row controls after leaving', async () => {

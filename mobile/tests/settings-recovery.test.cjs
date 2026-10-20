@@ -145,6 +145,7 @@ test('every recovery phase gates ordinary home/settings, even with a ready app s
   let phase='idle', status='ready'; const Stack = p => ({type:'Stack',props:p}); Stack.Screen='Screen'; Stack.Protected='Protected';
   const modules={
     'react/jsx-runtime':{jsx,jsxs:jsx},'expo-router':{Stack},'expo-notifications':{setNotificationHandler(){}},
+    '../components/notification-tap-gate': { NotificationTapGate: 'NotificationTapGate' },
     '../lib/notification-runtime': { notificationService: { canPresent: () => false } },
     '../lib/session':{SessionProvider:p=>p.children,useSession:()=>({status,session:session()})},
     '../lib/session-store':load('session-store'),

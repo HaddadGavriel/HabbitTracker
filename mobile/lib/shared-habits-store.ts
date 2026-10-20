@@ -1,5 +1,6 @@
 import type { Session } from '@supabase/supabase-js';
 import { ApiError, type SharedHabitResult } from './api';
+import { sampleClock, type ClockSample } from './reminder-rules';
 import type { SessionStore } from './session-store';
 
 type SessionSource = Pick<SessionStore, 'snapshot' | 'subscribe'>;
@@ -8,6 +9,7 @@ type API = {
   readSharedHabit(session: Session, id: string): Promise<SharedHabitResult>;
 };
 export type SharedHabitsState = {
+  observedAt: ClockSample | null;
   habits: SharedHabitResult[];
   habit: SharedHabitResult | null;
   hasLoaded: boolean;
@@ -17,7 +19,7 @@ export type SharedHabitsState = {
   inaccessible: boolean;
 };
 const emptyState = (): SharedHabitsState => ({
-  habits: [], habit: null, hasLoaded: false, loading: false, refreshing: false, error: null, inaccessible: false,
+  observedAt: null, habits: [], habit: null, hasLoaded: false, loading: false, refreshing: false, error: null, inaccessible: false,
 });
 
 function errorMessage(error: unknown): string {
@@ -100,13 +102,14 @@ export class SharedHabitsStore {
     // checking and keep it removed on every error, including ambiguous failures.
     this.publish({ ...emptyState(), hasLoaded: previouslyLoaded, loading: !previouslyLoaded, refreshing: previouslyLoaded });
     const isCurrent = () => revision === this.revision && this.currentSession() === session;
+    const observedAt = sampleClock();
     try {
       const rows = this.habitId ? [await this.api.readSharedHabit(session, this.habitId)] : await this.api.listSharedHabits(session);
       if (!isCurrent()) return;
       if (!Array.isArray(rows)) throw new Error('Invalid shared habit list');
       rows.forEach(row => this.validate(row, session));
       if (new Set(rows.map(row => row.id)).size !== rows.length) throw new Error('Duplicate shared habit');
-      this.publish({ ...emptyState(), hasLoaded: true, habits: this.habitId ? [] : rows, habit: this.habitId ? rows[0] : null });
+      this.publish({ ...emptyState(), observedAt, hasLoaded: true, habits: this.habitId ? [] : rows, habit: this.habitId ? rows[0] : null });
     } catch (error) {
       if (!isCurrent()) return;
       this.publish({ ...emptyState(), error: errorMessage(error),

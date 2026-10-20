@@ -4,9 +4,9 @@ Use two onboarded test accounts, Alice and Bob, in an Android development client
 against a compatible backend approved for manual testing. Use separate sessions,
 or sign out before switching accounts on one device. The existing
 [sharing](sharing.md) and [history/streak](history.md) contracts are unchanged.
-The sharing feature adds no backend routes, migrations, broader permissions or
-reminder buttons. Accessible excuse details and friend decisions are covered in
-the [mobile excuse walkthrough](mobile-excuses-walkthrough.md).
+The sharing feature adds no broader permissions. Explicit reminder controls and
+notification taps are covered in the [two-device reminder walkthrough](mobile-reminders-walkthrough.md).
+Accessible excuse details and friend decisions are covered in the [mobile excuse walkthrough](mobile-excuses-walkthrough.md).
 
 ## Owner permissions
 
@@ -48,8 +48,9 @@ the [mobile excuse walkthrough](mobile-excuses-walkthrough.md).
    habit, refresh and open its detail. Both screens show Alice's public display
    name/username, current configuration, owner-local date and timezone, due-today
    status, today's occurrence (if present), and the server's current streak.
-   There are no edit, archive, restore, completion, progress, full-history or
-   reminder controls. An occurrence with an excuse links to its accessible details;
+   There are no owner edit, archive, restore, completion, progress or full-history
+   controls. Eligible occurrences expose Remind; saved requests expose same-key
+   recovery controls. An occurrence with an excuse links to its accessible details;
    authorized friend decisions use the separate excuse workflow.
 2. Configure owners in different timezones using the existing profile API, for
    example `Asia/Tokyo` and `Pacific/Honolulu`. Share habits from both owners with

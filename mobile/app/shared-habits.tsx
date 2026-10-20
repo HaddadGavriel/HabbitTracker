@@ -1,7 +1,8 @@
 import { useCallback, useState, useSyncExternalStore } from 'react';
 import { Link, useFocusEffect } from 'expo-router';
-import { ActivityIndicator, Button, FlatList, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, Button, FlatList, StyleSheet, Text, View } from 'react-native';
 import { styles } from '../components/form';
+import { ReminderControls } from '../components/reminder-controls';
 import { SharedHabitView } from '../components/shared-habit-view';
 import { listSharedHabits, readSharedHabit } from '../lib/api';
 import { SharedHabitsStore } from '../lib/shared-habits-store';
@@ -10,8 +11,12 @@ import { useSession } from '../lib/session';
 export default function SharedHabits() {
   const { store: sessions } = useSession();
   const [store] = useState(() => new SharedHabitsStore(sessions, { listSharedHabits, readSharedHabit }));
-  const { habits, hasLoaded, loading, refreshing, error } = useSyncExternalStore(store.subscribe, store.snapshot);
-  useFocusEffect(useCallback(() => { store.start(); return () => store.stop(); }, [store]));
+  const { habits, observedAt, hasLoaded, loading, refreshing, error } = useSyncExternalStore(store.subscribe, store.snapshot);
+  useFocusEffect(useCallback(() => {
+    if (AppState.currentState !== 'background' && AppState.currentState !== 'inactive') store.start();
+    const subscription = AppState.addEventListener('change', next => { if (next === 'active') store.start(); else store.stop(); });
+    return () => { subscription.remove(); store.stop(); };
+  }, [store]));
   const busy = loading || refreshing;
 
   return <FlatList
@@ -37,6 +42,7 @@ export default function SharedHabits() {
       ? <Text style={styles.message}>No habits are currently shared with you. Your friends choose which habits to share; archived habits stay hidden.</Text> : null}
     renderItem={({ item }) => <View style={localStyles.section}>
       <SharedHabitView habit={item} />
+      <ReminderControls habit={item} observedAt={observedAt} />
       <Link href={{ pathname: '/shared-habit', params: { id: item.id } }} style={styles.message}
         accessibilityLabel={`View shared habit ${item.configuration.name} from @${item.owner.username}`}>View shared habit</Link>
     </View>}
