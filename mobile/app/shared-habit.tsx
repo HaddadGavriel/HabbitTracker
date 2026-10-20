@@ -1,6 +1,6 @@
 import { useCallback, useState, useSyncExternalStore } from 'react';
 import { Link, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { ActivityIndicator, Button, RefreshControl, ScrollView, Text } from 'react-native';
+import { ActivityIndicator, AppState, Button, RefreshControl, ScrollView, Text } from 'react-native';
 import { Form, Message, styles } from '../components/form';
 import { SharedHabitView } from '../components/shared-habit-view';
 import { listSharedHabits, readSharedHabit } from '../lib/api';
@@ -21,7 +21,11 @@ function Detail({ id }: { id: string }) {
   const { store: sessions } = useSession();
   const [store] = useState(() => new SharedHabitsStore(sessions, { listSharedHabits, readSharedHabit }, id));
   const { habit, loading, refreshing, error } = useSyncExternalStore(store.subscribe, store.snapshot);
-  useFocusEffect(useCallback(() => { store.start(); return () => store.stop(); }, [store]));
+  useFocusEffect(useCallback(() => {
+    if (AppState.currentState !== 'background' && AppState.currentState !== 'inactive') store.start();
+    const subscription = AppState.addEventListener('change', next => { if (next === 'active') store.start(); else store.stop(); });
+    return () => { subscription.remove(); store.stop(); };
+  }, [store]));
   const busy = loading || refreshing;
 
   return <ScrollView contentContainerStyle={styles.form}
@@ -37,5 +41,10 @@ function Detail({ id }: { id: string }) {
       <Button title="Retry loading" onPress={store.refresh} disabled={busy} />
     </>}
     {habit && <SharedHabitView habit={habit} />}
+    {habit?.occurrence && ['justification_pending', 'excused', 'missed'].includes(habit.occurrence.state) && <>
+      <Link href={{ pathname: '/excuse-detail', params: { occurrenceId: habit.occurrence.id } }} style={styles.message}>{habit.occurrence.state === 'missed' ? 'View excuse, if submitted' : 'View excuse'}</Link>
+      {habit.occurrence.state === 'missed' && <Text style={styles.message}>Missed occurrences may have no excuse.</Text>}
+    </>}
+    <Link href="/pending-excuses" style={styles.message}>Pending excuse decisions, including earlier dates</Link>
   </ScrollView>;
 }

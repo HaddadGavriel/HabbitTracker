@@ -1,5 +1,6 @@
 import type { Session } from '@supabase/supabase-js';
 import { usernameInput } from './username-input';
+import { explanationInput } from './excuse-input';
 
 const apiUrl = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '');
 
@@ -218,6 +219,31 @@ export type HistoryExcuse = {
 };
 
 export type HistoryOccurrence = OccurrenceResult & { excuse: HistoryExcuse | null };
+
+export type ExcuseResult = HistoryExcuse & {
+  occurrence_id: string;
+  habit_id: string;
+  owner_id: string;
+  occurrence: OccurrenceResult;
+};
+
+export async function submitExcuse(session: Session, occurrenceId: string, explanation: string): Promise<ExcuseResult> {
+  let normalized: string;
+  try { normalized = explanationInput(explanation); }
+  catch (error) { throw new ApiError(error instanceof Error ? error.message : 'Invalid explanation.', null, 'invalid_excuse_explanation'); }
+  return request<ExcuseResult>(`/occurrences/${encodeURIComponent(occurrenceId)}/excuse`, session,
+    { method: 'POST', body: JSON.stringify({ explanation: normalized }) });
+}
+
+export const readExcuse = (session: Session, occurrenceId: string) =>
+  request<ExcuseResult>(`/occurrences/${encodeURIComponent(occurrenceId)}/excuse`, session, { method: 'GET' });
+
+export const listPendingExcuses = (session: Session) =>
+  request<ExcuseResult[]>('/excuses/pending', session, { method: 'GET' });
+
+export const decideExcuse = (session: Session, excuseId: string, decision: 'approve' | 'reject') =>
+  request<ExcuseResult>(`/excuses/${encodeURIComponent(excuseId)}/decision`, session,
+    { method: 'POST', body: JSON.stringify({ decision }) });
 
 export type HistoryResult = {
   habit_id: string;

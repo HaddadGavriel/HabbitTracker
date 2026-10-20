@@ -1,10 +1,18 @@
 import type { Session } from '@supabase/supabase-js';
-import { ApiError, type OccurrenceResult, type TodayResult } from './api';
+import { ApiError, type ExcuseResult, type OccurrenceResult, type TodayResult } from './api';
+import { explanationInput } from './excuse-input';
 import type { SessionStore } from './session-store';
 
 type CompletionState = { pending: boolean; error: string | null; refreshRequired: boolean };
 type Operation = CompletionState & { context: number; clearErrorOnRefresh?: boolean };
 type Change = { kind: 'completion'; value: boolean } | { kind: 'progress'; value: number };
+type ExcuseAPI = {
+  readExcuse(session: Session, id: string): Promise<ExcuseResult>;
+  submitExcuse(session: Session, id: string, explanation: string): Promise<ExcuseResult>;
+};
+type ExcuseLock = { pending: boolean; needsRead: boolean; exists: boolean };
+type OwnerExcuse = { draft: string; open: boolean; details: boolean; result: ExcuseResult | null; error: string | null; message: string | null };
+const emptyExcuse = (): OwnerExcuse => ({ draft: '', open: false, details: false, result: null, error: null, message: null });
 type TodayState = {
   // Keep the server's date/timezone and occurrences together, including on failure.
   today: TodayResult | null;
@@ -13,8 +21,9 @@ type TodayState = {
   error: string | null;
   completions: Record<string, CompletionState>;
   progressDrafts: Record<string, string>;
+  excuses: Record<string, OwnerExcuse>;
 };
-const emptyState = (): TodayState => ({ today: null, loading: false, refreshing: false, error: null, completions: {}, progressDrafts: {} });
+const emptyState = (): TodayState => ({ today: null, loading: false, refreshing: false, error: null, completions: {}, progressDrafts: {}, excuses: {} });
 
 /** JSON numbers must remain exact; never round a user's absolute assignment. */
 export function parseProgress(value: string): number {
@@ -47,6 +56,10 @@ function atLeastAsRecent(timestamp: string, previous: string): boolean {
 
 /** Screen-scoped server snapshots. The server owns states and all write eligibility. */
 export class TodayStore {
+  // Keep only write guards across screen remounts; never retain explanations or credentials.
+  private static excuseGuards = new WeakMap<object, { locks: Map<string, ExcuseLock>; activeStores: Set<TodayStore> }>();
+  private excuseGroup: { locks: Map<string, ExcuseLock>; activeStores: Set<TodayStore> };
+  private excuseLocks: Map<string, ExcuseLock>;
   private state = emptyState();
   private listeners = new Set<() => void>();
   private session: Session | null = null;
@@ -66,7 +79,12 @@ export class TodayStore {
     private writeCompletion: (session: Session, id: string, completed: boolean) => Promise<OccurrenceResult>,
     private writeProgress: (session: Session, id: string, progress: number) => Promise<OccurrenceResult>,
     private now: () => number = () => performance.now(),
-  ) {}
+    private excuseAPI?: ExcuseAPI,
+  ) {
+    this.excuseGroup = TodayStore.excuseGuards.get(sessions) ?? { locks: new Map(), activeStores: new Set() };
+    this.excuseLocks = this.excuseGroup.locks;
+    TodayStore.excuseGuards.set(sessions, this.excuseGroup);
+  }
   snapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private publish(state: TodayState) {
@@ -96,7 +114,7 @@ export class TodayStore {
   }
   private editable(item: OccurrenceResult): boolean {
     const today = this.state.today;
-    return !!this.currentSession() && !!today?.occurrences.includes(item) && item.local_date === today.local_date
+    return !this.excuseLocks.has(this.key(item.owner_id, item.id)) && !!this.currentSession() && !!today?.occurrences.includes(item) && item.local_date === today.local_date
       && item.owner_id === this.session?.user.id && this.serverNow() < Date.parse(item.closes_at)
       && ((item.state === 'in_progress' && !item.completed) || (item.state === 'completed' && item.completed));
   }
@@ -105,6 +123,93 @@ export class TodayStore {
     if (item.state === 'in_progress' && !item.completed) return true;
     if (item.state === 'completed' && item.completed) return false;
     return null;
+  };
+  canSubmitExcuse = (item: OccurrenceResult): boolean => !!this.excuseAPI && this.editable(item)
+    && item.state === 'in_progress' && !item.completed && !this.state.loading && !this.state.refreshing && !this.state.error
+    && !this.operations.get(this.key(item.owner_id, item.id))?.pending
+    && !this.operations.get(this.key(item.owner_id, item.id))?.refreshRequired;
+  excuseBusy = (item: OccurrenceResult) => !!this.excuseLocks.get(this.key(item.owner_id, item.id))?.pending;
+  excuseNeedsRead = (item: OccurrenceResult) => !!this.excuseLocks.get(this.key(item.owner_id, item.id))?.needsRead;
+  private setExcuse(id: string, changes: Partial<OwnerExcuse>) {
+    this.publish({ ...this.state, excuses: { ...this.state.excuses, [id]: { ...(this.state.excuses[id] ?? emptyExcuse()), ...changes } } });
+  }
+  openExcuse = (item: OccurrenceResult) => {
+    if (this.canSubmitExcuse(item)) this.setExcuse(item.id, { open: true, error: null });
+  };
+  setExplanation = (item: OccurrenceResult, draft: string) => {
+    if (this.canSubmitExcuse(item)) this.setExcuse(item.id, { draft, error: null });
+  };
+  showExcuse = async (item: OccurrenceResult) => {
+    if (!this.excuseAPI || !this.currentSession() || !this.state.today?.occurrences.includes(item)) return;
+    this.setExcuse(item.id, { details: true });
+    await this.reload();
+  };
+
+  private validateExcuse(result: ExcuseResult, item: OccurrenceResult) {
+    const occurrence = result?.occurrence;
+    const finalState = result?.status === 'approved' ? 'excused' : result?.status === 'rejected' ? 'missed' : 'justification_pending';
+    if (!result || !result.id || result.occurrence_id !== item.id || result.habit_id !== item.habit_id || result.owner_id !== item.owner_id
+      || !occurrence || occurrence.id !== item.id || occurrence.owner_id !== item.owner_id || occurrence.habit_id !== item.habit_id
+      || occurrence.closes_at !== item.closes_at || occurrence.local_date !== item.local_date || occurrence.timezone !== item.timezone
+      || occurrence.state !== finalState || occurrence.completed || typeof result.explanation !== 'string'
+      || !['pending', 'approved', 'rejected'].includes(result.status) || !Number.isFinite(Date.parse(result.created_at))
+      || !Number.isFinite(Date.parse(occurrence.updated_at))
+      || (result.status === 'pending' ? result.decision_source !== null || result.decided_at !== null || result.decided_by !== null
+        : !Number.isFinite(Date.parse(result.decided_at ?? '')) || !['automatic', 'friend'].includes(result.decision_source ?? '')
+          || (result.decision_source === 'automatic' ? result.status !== 'approved' || result.decided_by !== null : !result.decided_by))) {
+      throw new ApiError('Unexpected excuse response', 200, 'invalid_response');
+    }
+  }
+
+  submitExplanation = async (item: OccurrenceResult) => {
+    const session = this.currentSession();
+    if (!session || !this.excuseAPI || !this.canSubmitExcuse(item) || !this.state.excuses[item.id]?.open) return;
+    let explanation: string;
+    try { explanation = explanationInput(this.state.excuses[item.id].draft); }
+    catch (error) { this.setExcuse(item.id, { error: error instanceof Error ? error.message : 'Invalid explanation.' }); return; }
+    const key = this.key(session.user.id, item.id), context = this.context;
+    const lock: ExcuseLock = { pending: true, needsRead: false, exists: false };
+    this.excuseLocks.set(key, lock);
+    this.setExcuse(item.id, { error: null, message: null });
+    const isCurrent = () => context === this.context && this.currentSession()?.user.id === session.user.id
+      && this.state.today?.occurrences.some(row => row.id === item.id);
+    try {
+      const result = await this.excuseAPI.submitExcuse(session, item.id, explanation);
+      this.validateExcuse(result, item);
+      this.excuseLocks.set(key, { pending: false, needsRead: true, exists: true });
+      if (!isCurrent()) return;
+      this.readRevision++;
+      const today = this.state.today!;
+      this.publish({ ...this.state, today: { ...today, occurrences: today.occurrences.map(row => row.id === item.id ? result.occurrence : row) } });
+      this.setExcuse(item.id, { open: false, details: true, result, draft: '', message: result.status === 'pending'
+        ? 'Excuse submitted. Awaiting an authorized friend’s decision.'
+        : result.decision_source === 'automatic' ? 'Excuse automatically approved by the server.' : 'Excuse submitted. The server has recorded a final friend decision.' });
+    } catch (error) {
+      const code = error instanceof ApiError ? error.code : '';
+      const recoverable = error instanceof ApiError && (code === 'configuration_error' || code === 'invalid_excuse_explanation'
+        || (error.status !== null && [401, 422, 429].includes(error.status) && !['request_timeout', 'network_error'].includes(code)));
+      if (recoverable) this.excuseLocks.delete(key);
+      else this.excuseLocks.set(key, { pending: false, needsRead: true, exists: code === 'excuse_exists' });
+      if (!isCurrent()) return;
+      this.setExcuse(item.id, { error: recoverable
+        ? 'Unable to submit. Your explanation is saved here; check your connection, session, or explanation and retry.'
+        : 'Submission was not confirmed. Checking the existing excuse and current occurrence before another submission.' });
+      if (recoverable) return;
+    } finally {
+      // A screen may have blurred and returned while the request was in flight.
+      // Wake its current controls without publishing the previous context's result.
+      if (!isCurrent() && this.currentSession()?.user.id === session.user.id) {
+        this.publish({ ...this.state });
+        void this.reload();
+      }
+      for (const store of this.excuseGroup.activeStores) {
+        if (store !== this && store.currentSession()?.user.id === session.user.id) {
+          store.publish({ ...store.state });
+          void store.reload();
+        }
+      }
+    }
+    if (isCurrent()) await this.reload();
   };
   canSetProgress = (item: OccurrenceResult): boolean => this.editable(item) && item.snapshot.type === 'target';
   progressValue = (item: OccurrenceResult): string => this.state.progressDrafts[item.id]
@@ -132,11 +237,13 @@ export class TodayStore {
   start() {
     if (this.active) return;
     this.active = true;
+    this.excuseGroup.activeStores.add(this);
     this.unsubscribe = this.sessions.subscribe(this.acceptSession);
     this.acceptSession();
   }
   stop() {
     this.active = false;
+    this.excuseGroup.activeStores.delete(this);
     this.context++;
     this.readRevision++;
     this.unsubscribe?.();
@@ -166,15 +273,59 @@ export class TodayStore {
     const revision = ++this.readRevision;
     const started = this.now();
     const operationsAtStart = new Map(this.operations);
+    const excuseLocksAtStart = new Map(this.excuseLocks);
+    const excuseIds = new Set(Object.entries(this.state.excuses).filter(([, value]) => value.details).map(([id]) => id));
+    for (const [key, lock] of excuseLocksAtStart) {
+      if (key.startsWith(`${session.user.id}:`) && !lock.pending && lock.needsRead) excuseIds.add(key.slice(session.user.id.length + 1));
+    }
     this.publish({ ...this.state, loading: !this.state.today, refreshing: !!this.state.today, error: null });
     const isCurrent = () => this.active && revision === this.readRevision && this.currentSession() === session;
     try {
-      const today = await this.readToday(session);
+      const [today, excuseReads] = await Promise.all([this.readToday(session), Promise.all([...excuseIds].map(async (id): Promise<{ id: string; result: ExcuseResult | null; error: unknown }> => {
+        try { return { id, result: await this.excuseAPI!.readExcuse(session, id), error: null }; }
+        catch (error) { return { id, result: null, error }; }
+      }))]);
       if (!isCurrent()) return;
       if (today.occurrences.some(occurrence => occurrence.owner_id !== session.user.id)) throw new Error('Occurrence owner mismatch');
       const changedDate = this.state.today && (today.local_date !== this.state.today.local_date || today.timezone !== this.state.today.timezone);
       if (changedDate) this.context++;
       this.clock = { server: Date.parse(today.server_time), started };
+      const excuses = changedDate ? {} : { ...this.state.excuses };
+      for (const read of excuseReads) {
+        const item = today.occurrences.find(row => row.id === read.id);
+        if (!item) continue;
+        const key = this.key(session.user.id, item.id), lock = this.excuseLocks.get(key);
+        if (lock !== excuseLocksAtStart.get(key) || lock?.pending) continue;
+        const previous = excuses[item.id] ?? emptyExcuse();
+        if (read.result) {
+          this.validateExcuse(read.result, item);
+          if (!atLeastAsRecent(read.result.occurrence.updated_at, item.updated_at)) {
+            // A friend may decide between the two reads. Re-read once instead
+            // of pairing a final Today state with outdated pending details.
+            try { read.result = await this.excuseAPI!.readExcuse(session, item.id); }
+            catch (error) { read.result = null; read.error = error; }
+            if (!isCurrent()) return;
+          }
+        }
+        if (read.result) {
+          this.validateExcuse(read.result, item);
+          if (!atLeastAsRecent(read.result.occurrence.updated_at, item.updated_at)
+            || (read.result.occurrence.updated_at === item.updated_at && read.result.occurrence.state !== item.state)) {
+            this.excuseLocks.set(key, { pending: false, needsRead: true, exists: true });
+            excuses[item.id] = { ...previous, result: null, error: 'The occurrence changed while loading its excuse. Refresh Today to read the current decision.' };
+            continue;
+          }
+          this.excuseLocks.set(key, { pending: false, needsRead: false, exists: true });
+          excuses[item.id] = { ...previous, open: false, details: true, result: read.result, error: null };
+          if (atLeastAsRecent(read.result.occurrence.updated_at, item.updated_at)) Object.assign(item, read.result.occurrence);
+        } else if (read.error instanceof ApiError && read.error.code === 'excuse_not_found' && !lock?.exists) {
+          this.excuseLocks.delete(key);
+          excuses[item.id] = { ...previous, result: null, details: false,
+            error: lock ? 'No excuse was found. Current occurrence checked; you may submit if it is still eligible.' : 'No excuse is available for this occurrence.' };
+        } else {
+          excuses[item.id] = { ...previous, result: null, error: 'Unable to verify the excuse. Refresh Today to check again. Your draft is preserved.' };
+        }
+      }
       for (const item of today.occurrences) {
         const key = this.key(session.user.id, item.id);
         const operation = this.operations.get(key);
@@ -187,7 +338,7 @@ export class TodayStore {
       const progressDrafts = changedDate ? {} : Object.fromEntries(today.occurrences
         .filter(item => this.state.progressDrafts[item.id] !== undefined)
         .map(item => [item.id, this.state.progressDrafts[item.id]]));
-      this.publish({ today, loading: false, refreshing: false, error: null, completions: this.completionStates(today), progressDrafts });
+      this.publish({ today, loading: false, refreshing: false, error: null, completions: this.completionStates(today), progressDrafts, excuses });
     } catch (error) {
       if (!isCurrent()) return;
       this.publish({ ...this.state, loading: false, refreshing: false, error: errorMessage(error) });

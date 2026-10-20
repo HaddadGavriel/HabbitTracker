@@ -6,7 +6,9 @@ approves. Otherwise it waits for any currently authorized shared friend to
 approve or reject. Submission permanently locks normal completion/progress for
 that occurrence. [Owner occurrence history and current streaks](history.md)
 include these decisions and preserve unresolved decisions as provisional streaks.
-Notifications and mobile UI remain deferred.
+The [mobile excuse walkthrough](mobile-excuses-walkthrough.md) covers owner
+submission/details and the pending friend-decision workflow. Excuse notifications
+remain deferred.
 
 ## HTTP contracts
 
