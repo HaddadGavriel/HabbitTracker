@@ -311,6 +311,7 @@ test('normal navigation reaches the shared list and both shared routes require a
     'react/jsx-runtime': runtime, 'expo-router': { Link: 'Link', Stack }, 'react-native': native,
     'expo-notifications': { setNotificationHandler() {} }, '../components/form': form,
     '../lib/session-store': { routeAccess },
+    '../lib/auth-link-context': { AuthLinkProvider: props => props.children, useAuthLink: () => ({ phase: 'idle' }) },
     '../lib/session': { SessionProvider: props => props.children, useSession: () => state },
   };
   const load = path => compile(path, name => { assert.ok(modules[name], `Unexpected navigation dependency: ${name}`); return modules[name]; }).default;

@@ -852,3 +852,12 @@ test('existing infrastructure functions preserve signatures, payloads and result
     assert.equal(init.headers.Authorization, 'Bearer current-access-secret');
   }
 });
+
+test('profile PATCH sends only editable fields and uses the supplied access token', async () => {
+  let call;
+  const api = client(async (url, init) => { call = { url, init }; return json(200, profile); });
+  const fields = { username: 'alice_1', display_name: 'Alice', timezone: 'Asia/Jerusalem' };
+  assert.deepEqual(await api.updateProfile(session, fields), profile);
+  assert.equal(call.url, 'https://api.example.test/profiles/me'); assert.equal(call.init.method,'PATCH');
+  assert.deepEqual(JSON.parse(call.init.body),fields); assert.equal(call.init.headers.Authorization,'Bearer current-access-secret');
+});

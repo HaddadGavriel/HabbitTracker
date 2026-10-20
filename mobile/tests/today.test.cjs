@@ -1346,6 +1346,7 @@ test('Home links to Today and its route is protected for ready accounts only', (
     'expo-notifications': { setNotificationHandler() {} },
     '../components/form': { Form: 'Form', styles: {} },
     '../lib/session-store': { routeAccess },
+    '../lib/auth-link-context': { AuthLinkProvider: props => props.children, useAuthLink: () => ({ phase: 'idle' }) },
     '../lib/session': { SessionProvider: props => props.children,
       useSession: () => ({ status, session: session(), profile: profile('a'), store: { signOut() {} } }) },
   };

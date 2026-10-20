@@ -3,8 +3,8 @@ import { ApiError, type ProfileCreate, type ProfileResult } from './api';
 
 type Status = 'startup' | 'loading' | 'signed_out' | 'profile_required' | 'ready' | 'failure';
 export type SessionState = { status: Status; session: Session | null; profile: ProfileResult | null; error: string | null };
-type Auth = Pick<SupabaseClient['auth'], 'getSession' | 'onAuthStateChange' | 'signOut'>;
-type API = { readProfile(session: Session): Promise<ProfileResult>; createProfile(session: Session, input: ProfileCreate): Promise<ProfileResult> };
+type Auth = Pick<SupabaseClient['auth'], 'getSession' | 'onAuthStateChange' | 'signOut' | 'refreshSession'>;
+type API = { updateProfile?(session: Session, input: ProfileCreate): Promise<ProfileResult>; readProfile(session: Session): Promise<ProfileResult>; createProfile(session: Session, input: ProfileCreate): Promise<ProfileResult> };
 export function routeAccess(status: Status) {
   return { auth: status === 'signed_out', onboarding: status === 'profile_required', home: status === 'ready', pending: status === 'startup' || status === 'loading' || status === 'failure' };
 }
@@ -14,6 +14,8 @@ export class SessionStore {
   private revision = 0;
   private active = false;
   private unsubscribe?: () => void;
+  private identity = 0;
+  private saving = false;
   private creation: Promise<void> | null = null;
   constructor(private auth: Auth, private api: API) {}
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -33,12 +35,12 @@ export class SessionStore {
       if (this.active && revision === this.revision) this.publish({ ...this.state, status: 'failure', error: 'Unable to restore your session. Please retry.' });
     }
   }
-  stop() { this.active = false; this.revision++; this.unsubscribe?.(); }
+  stop() { this.active = false; this.revision++; this.identity++; this.unsubscribe?.(); }
   private async accept(session: Session | null) {
     const revision = ++this.revision;
-    if (!session) { this.publish({ status: 'signed_out', session: null, profile: null, error: null }); return; }
+    if (!session) { this.identity++; this.publish({ status: 'signed_out', session: null, profile: null, error: null }); return; }
     const sameUser = session.user.id === this.state.session?.user.id;
-    if (!sameUser) this.creation = null;
+    if (!sameUser) { this.identity++; this.creation = null; }
     const profile = sameUser ? this.state.profile : null;
     this.publish({ status: profile ? 'ready' : 'loading', session, profile, error: null });
     if (!profile) await this.load(session, revision);
@@ -64,6 +66,7 @@ export class SessionStore {
   signOut = async () => {
     // Invalidate in-flight profile reads/mutations before waiting for storage/network.
     const revision = ++this.revision;
+    this.identity++;
     this.publish({ status: 'loading', session: this.state.session, profile: null, error: null });
     try {
       const { error } = await this.auth.signOut({ scope: 'local' });
@@ -73,6 +76,45 @@ export class SessionStore {
       if (!this.active || revision !== this.revision) return;
       this.publish({ ...this.state, status: 'failure', profile: null, error: 'Sign-out failed. Retry sign-out before leaving this device.' });
     }
+  };
+  refreshProfile = async (): Promise<boolean> => {
+    const session = this.state.session;
+    const revision = ++this.revision;
+    if (!session || this.state.status !== 'ready') return false;
+    const profile = await this.api.readProfile(session);
+    if (!this.active || revision !== this.revision) return false;
+    if (profile.user_id !== session.user.id) throw new Error('Unable to verify your profile.');
+    this.publish({ ...this.state, session: { ...this.state.session! }, profile });
+    return true;
+  };
+  update = async (input: ProfileCreate): Promise<boolean> => {
+    if (this.saving) throw new Error('A save is already in progress.');
+    let session = this.state.session;
+    if (!session || this.state.status !== 'ready' || !this.api.updateProfile) throw new Error('Sign in again before saving.');
+    const identity = this.identity;
+    const current = () => this.active && identity === this.identity && this.state.status === 'ready' && this.state.session?.user.id === session?.user.id;
+    this.saving = true;
+    this.revision++;
+    try {
+      let profile: ProfileResult;
+      try { profile = await this.api.updateProfile(session, input); }
+      catch (error) {
+        if (!(error instanceof ApiError) || error.status !== 401 || !current()) throw error;
+        const refreshed = await this.auth.refreshSession();
+        if (!current()) return false;
+        if (refreshed.error || !refreshed.data.session || refreshed.data.session.user.id !== session.user.id) throw new Error('Your session expired. Sign out and sign in again.');
+        session = refreshed.data.session;
+        await this.accept(session);
+        profile = await this.api.updateProfile(session, input);
+      }
+      if (!current()) return false;
+      if (profile.user_id !== session.user.id) throw new Error('Unable to verify the saved profile. Reload before retrying.');
+      this.revision++;
+      // A new session reference invalidates date-dependent stores and their old reads.
+      this.publish({ ...this.state, session: { ...this.state.session! }, profile });
+      return true;
+    } catch (error) { if (!current()) return false; throw error; }
+    finally { this.saving = false; }
   };
   create = (input: ProfileCreate): Promise<void> => {
     if (this.creation) return this.creation;

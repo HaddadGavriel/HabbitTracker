@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { Button, Text } from 'react-native';
 import { Link } from 'expo-router';
+import { authRedirect } from '../lib/auth-links';
 import { supabase } from '../lib/supabase';
 import { Field, Form, Loading, Message, styles } from './form';
 export function AuthForm({ signup = false }: { signup?: boolean }) {
@@ -13,8 +14,8 @@ export function AuthForm({ signup = false }: { signup?: boolean }) {
     submitting.current = true; setBusy(true); setMessage(null);
     try {
       const credentials = { email: email.trim(), password };
-      const response = signup ? await supabase.auth.signUp(credentials) : await supabase.auth.signInWithPassword(credentials);
-      if (response.error) setMessage(response.error.message);
+      const response = signup ? await supabase.auth.signUp({ ...credentials, options: { emailRedirectTo: authRedirect } }) : await supabase.auth.signInWithPassword(credentials);
+      if (response.error) setMessage('Unable to sign in or create this account. Check your credentials, password requirements, and email confirmation.');
       else if (signup && !response.data.session) { setPassword(''); setMessage('Check your email for a confirmation link. Confirm your email, then return here to sign in.'); }
     } catch { setMessage('Unable to contact authentication. Check your connection and try again.'); }
     finally { submitting.current = false; setBusy(false); }
@@ -24,6 +25,7 @@ export function AuthForm({ signup = false }: { signup?: boolean }) {
     <Field label="Password" value={password} onChangeText={setPassword} editable={!busy} secureTextEntry autoCapitalize="none" autoComplete={signup ? 'new-password' : 'current-password'} onSubmitEditing={submit} returnKeyType="done" />
     {signup && <Text>Use at least 6 characters, or the longer minimum required by your account service.</Text>}
     <Message text={message} />{busy && <Loading />}<Button title={signup ? 'Sign up' : 'Sign in'} disabled={busy} onPress={submit} />
+    {!busy && <Link href="/forgot-password" style={styles.message}>Forgot password or resend confirmation</Link>}
     {!busy && <Link href={signup ? '/sign-in' : '/sign-up'} style={styles.message}>{signup ? 'Already have an account? Sign in' : 'Create an account'}</Link>}
   </Form>;
 }
