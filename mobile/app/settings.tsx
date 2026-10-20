@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { Button, Text } from 'react-native';
 import { Link } from 'expo-router';
 import { Field, Form, Message, styles } from '../components/form';
+import { NotificationControls } from '../components/notification-controls';
 import { ApiError } from '../lib/api';
 import { profileInput } from '../lib/profile-input';
 import { useSession } from '../lib/session';
@@ -47,6 +48,7 @@ export default function Settings() {
     <Text>Timezone changes affect future scheduling. Existing occurrence dates and deadlines remain fixed under the backend policy. Changing your device timezone does not change this account setting.</Text>
     <Message text={message} /><Button title={busy ? 'Saving…' : 'Save settings'} disabled={busy} onPress={save} />
     <Button title="Reload saved profile" disabled={busy} onPress={reload} />
+    <NotificationControls />
     <Link href="/home" style={styles.message}>Back to home</Link><Button title="Sign out" onPress={store.signOut} />
   </Form>;
 }

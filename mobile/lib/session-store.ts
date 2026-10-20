@@ -4,6 +4,7 @@ import { ApiError, type ProfileCreate, type ProfileResult } from './api';
 type Status = 'startup' | 'loading' | 'signed_out' | 'profile_required' | 'ready' | 'failure';
 export type SessionState = { status: Status; session: Session | null; profile: ProfileResult | null; error: string | null };
 type Auth = Pick<SupabaseClient['auth'], 'getSession' | 'onAuthStateChange' | 'signOut' | 'refreshSession'>;
+type Notifications = { setSession(session: Session | null, cleanupSession?: Session | null): Promise<void> };
 type API = { updateProfile?(session: Session, input: ProfileCreate): Promise<ProfileResult>; readProfile(session: Session): Promise<ProfileResult>; createProfile(session: Session, input: ProfileCreate): Promise<ProfileResult> };
 export function routeAccess(status: Status) {
   return { auth: status === 'signed_out', onboarding: status === 'profile_required', home: status === 'ready', pending: status === 'startup' || status === 'loading' || status === 'failure' };
@@ -17,7 +18,8 @@ export class SessionStore {
   private identity = 0;
   private saving = false;
   private creation: Promise<void> | null = null;
-  constructor(private auth: Auth, private api: API) {}
+  private signingOutFor: string | null = null;
+  constructor(private auth: Auth, private api: API, private notifications?: Notifications) {}
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   snapshot = () => this.state;
   private publish(state: SessionState) { this.state = state; this.listeners.forEach(listener => listener()); }
@@ -37,6 +39,10 @@ export class SessionStore {
   }
   stop() { this.active = false; this.revision++; this.identity++; this.unsubscribe?.(); }
   private async accept(session: Session | null) {
+    if (!session) this.signingOutFor = null;
+    if (session && session.user.id === this.signingOutFor) return;
+    if (session) this.signingOutFor = null;
+    void this.notifications?.setSession(session);
     const revision = ++this.revision;
     if (!session) { this.identity++; this.publish({ status: 'signed_out', session: null, profile: null, error: null }); return; }
     const sameUser = session.user.id === this.state.session?.user.id;
@@ -67,13 +73,17 @@ export class SessionStore {
     // Invalidate in-flight profile reads/mutations before waiting for storage/network.
     const revision = ++this.revision;
     this.identity++;
+    this.signingOutFor = this.state.session?.user.id ?? null;
     this.publish({ status: 'loading', session: this.state.session, profile: null, error: null });
     try {
+      await this.notifications?.setSession(null, this.state.session);
+      if (revision !== this.revision) return;
       const { error } = await this.auth.signOut({ scope: 'local' });
       if (error) throw error;
       if (revision === this.revision) await this.accept(null);
     } catch {
       if (!this.active || revision !== this.revision) return;
+      this.signingOutFor = null;
       this.publish({ ...this.state, status: 'failure', profile: null, error: 'Sign-out failed. Retry sign-out before leaving this device.' });
     }
   };

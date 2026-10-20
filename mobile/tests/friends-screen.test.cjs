@@ -308,6 +308,7 @@ test('Home links to Friends and shared habits; friendship and sharing routes req
     'react/jsx-runtime': { jsx, jsxs: jsx },
     'expo-router': { Stack, Link: 'Link' },
     'expo-notifications': { setNotificationHandler() {} },
+    '../lib/notification-runtime': { notificationService: { canPresent: () => false } },
     'react-native': { Button: 'Button', Text: 'Text' },
     '../components/form': { Form: 'Form', styles: {} },
     '../lib/session': { SessionProvider: ({ children }) => children, useSession: () => state },

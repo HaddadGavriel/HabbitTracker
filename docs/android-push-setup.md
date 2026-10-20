@@ -104,12 +104,19 @@ Install the development APK. Keep phone and computer able to reach Metro, or use
 ## 6. Verify registration and real remote delivery
 
 1. Confirm `EXPO_PUBLIC_API_URL` is your deployed HTTPS Render origin with no path suffix.
-2. Launch the installed app, sign up/sign in, and tap **Register notifications**.
-3. Allow Android's notification prompt. The screen must report that FastAPI persisted the token.
+2. Launch the installed app, sign up/sign in, complete onboarding, then open **Settings → Enable notifications**.
+3. Allow Android's notification prompt. Settings must report notifications enabled for this account. Denial offers system notification settings; allow there and tap Enable again.
 4. In Supabase Table Editor inspect `device_push_tokens`; a row should contain this user's UUID and an `ExponentPushToken[...]` or `ExpoPushToken[...]`. Do not share that token.
-5. Tap **Run Infrastructure Test** and note the displayed request ID.
+5. Open **Infrastructure diagnostics** and tap **Run Infrastructure Test** and note the displayed request ID.
 6. Confirm the API/database/push-request stages succeed and a notification carrying the identical ID arrives.
 7. Inspect `infrastructure_tests`: status should be `push_accepted`, with an `expo_ticket_id`.
 8. Repeat and immediately background or close the app. The Android OS must still display the notification, proving this is remote delivery rather than a local notification call.
 
 An Expo ticket proves Expo accepted the request, not that Android displayed it. If delivery fails, verify notification permission, FCM V1 credentials, Firebase project/package consistency, connectivity, and battery restrictions. Receipt polling is intentionally outside this minimal proof.
+
+Registration and cleanup use one application service in Settings and Diagnostics.
+Before releasing, follow the migration/backend/native-build order and the offline
+logout/account-switch checks in [mobile notifications](mobile-notifications.md).
+The app creates `friend-reminders` and `infrastructure-tests` channels; friend
+pushes explicitly target the former. Returning from Android notification settings
+rechecks permission without prompting. No push token is shown in ordinary UI.

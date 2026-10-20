@@ -829,9 +829,9 @@ test('settled success/failure clears deadline without aborting completed request
   }
 });
 
-test('existing infrastructure functions preserve signatures, payloads and results', async () => {
+test('registration supplies platform and intent identity while infrastructure contract remains compatible', async () => {
   const calls = [];
-  const device = { registered: true, platform: 'android', updated_at: profile.updated_at };
+  const device = { registered: true, registration_id: 'intent-id', platform: 'ios', updated_at: profile.updated_at };
   const result = {
     request_id: 'infra_123', success: true, database_verified: true, push_requested: true,
     expo_ticket_id: null, server_received_at: profile.created_at,
@@ -841,11 +841,11 @@ test('existing infrastructure functions preserve signatures, payloads and result
     calls.push({ url, init });
     return json(200, url.endsWith('/devices/register') ? device : result);
   });
-  assert.deepEqual(await api.registerDevice(session, 'ExpoPushToken[mock]'), device);
+  assert.deepEqual(await api.registerDevice(session, 'ExpoPushToken[mock]', 'intent-id', 'ios'), device);
   assert.deepEqual(await api.runInfrastructureTest(session, 'infra_123', profile.created_at), result);
   assert.equal(calls[0].url, 'https://api.example.test/devices/register');
   assert.equal(calls[1].url, 'https://api.example.test/infrastructure-test');
-  assert.deepEqual(JSON.parse(calls[0].init.body), { expo_push_token: 'ExpoPushToken[mock]', platform: 'android' });
+  assert.deepEqual(JSON.parse(calls[0].init.body), { expo_push_token: 'ExpoPushToken[mock]', registration_id: 'intent-id', platform: 'ios' });
   assert.deepEqual(JSON.parse(calls[1].init.body), { request_id: 'infra_123', client_started_at: profile.created_at });
   for (const { init } of calls) {
     assert.equal(init.method, 'POST');
@@ -860,4 +860,15 @@ test('profile PATCH sends only editable fields and uses the supplied access toke
   assert.deepEqual(await api.updateProfile(session, fields), profile);
   assert.equal(call.url, 'https://api.example.test/profiles/me'); assert.equal(call.init.method,'PATCH');
   assert.deepEqual(JSON.parse(call.init.body),fields); assert.equal(call.init.headers.Authorization,'Bearer current-access-secret');
+});
+
+
+test('unregister sends only the exact intent ID with current account credentials', async () => {
+  let call;
+  const api = client(async (url, init) => { call = { url, init }; return json(200, { removed: false }); });
+  assert.deepEqual(await api.unregisterDevice(session, 'intent-id'), { removed: false });
+  assert.equal(call.url, 'https://api.example.test/devices/unregister');
+  assert.equal(call.init.method, 'POST');
+  assert.equal(call.init.headers.Authorization, 'Bearer current-access-secret');
+  assert.deepEqual(JSON.parse(call.init.body), { registration_id: 'intent-id' });
 });

@@ -1,9 +1,10 @@
+import { notificationService } from '../lib/notification-runtime';
 import { Stack } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { SessionProvider, useSession } from '../lib/session';
 import { AuthLinkProvider, useAuthLink } from '../lib/auth-link-context';
 import { routeAccess } from '../lib/session-store';
-Notifications.setNotificationHandler({ handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }) });
+Notifications.setNotificationHandler({ handleNotification: async () => ({ shouldShowBanner: notificationService.canPresent(), shouldShowList: notificationService.canPresent(), shouldPlaySound: notificationService.canPresent(), shouldSetBadge: false }) });
 function Routes() {
   const { status, session } = useSession();
   const access = routeAccess(status);

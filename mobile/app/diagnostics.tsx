@@ -1,11 +1,11 @@
-import Constants from 'expo-constants';
-import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { useEffect, useRef, useState } from 'react';
-import { Button, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Button, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { registerDevice, runInfrastructureTest, type TestResult } from '../lib/api';
+import { runInfrastructureTest, type TestResult } from '../lib/api';
 import { useSession } from '../lib/session';
+
+import { NotificationControls, useNotifications } from '../components/notification-controls';
 
 type Stage = { label: string; value: string; ok?: boolean };
 
@@ -18,7 +18,8 @@ function InfrastructureScreen() {
   const alive = useRef(true);
   const submitting = useRef(false);
   const [message, setMessage] = useState('Register this physical device to test infrastructure.');
-  const [registered, setRegistered] = useState(false);
+  const notifications = useNotifications();
+  const registered = notifications.status === 'enabled';
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<TestResult | null>(null);
   const [roundTrip, setRoundTrip] = useState<number | null>(null);
@@ -31,27 +32,6 @@ function InfrastructureScreen() {
     alive.current = true;
     return () => { alive.current = false; notification.remove(); };
   }, []);
-
-  async function registerPush() {
-    if (!session || submitting.current) return;
-    submitting.current = true;
-    setBusy(true); setRegistered(false); setMessage('Requesting notification permission…');
-    try {
-      if (!Device.isDevice) throw new Error('Remote push requires a physical Android device.');
-      if (Platform.OS === 'android') await Notifications.setNotificationChannelAsync('default', { name: 'Infrastructure tests', importance: Notifications.AndroidImportance.MAX });
-      const existing = await Notifications.getPermissionsAsync();
-      const permission = existing.status === 'granted' ? existing : await Notifications.requestPermissionsAsync();
-      if (permission.status !== 'granted') throw new Error('Notification permission was not granted.');
-      const projectId = process.env.EXPO_PUBLIC_EAS_PROJECT_ID || Constants.expoConfig?.extra?.eas?.projectId;
-      if (!projectId || projectId.startsWith('REPLACE_')) throw new Error('Set a real EAS project ID before building.');
-      const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
-      if (!alive.current) return;
-      await registerDevice(session, token);
-      if (!alive.current) return;
-      setRegistered(true); setMessage(`Push token registered (${token.slice(0, 24)}…).`);
-    } catch (error) { if (!alive.current) return; setMessage(`Push registration failed: ${error instanceof Error ? error.message : String(error)}`); }
-    finally { submitting.current = false; if (alive.current) setBusy(false); }
-  }
 
   async function runTest() {
     if (!session || !registered || submitting.current) return;
@@ -78,7 +58,7 @@ function InfrastructureScreen() {
 
   return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.container}>
     <Text style={styles.title}>Infrastructure Test</Text>
-    <Button title="Register notifications" disabled={busy} onPress={registerPush} />
+    <NotificationControls />
     <View style={styles.primary}><Button title="Run Infrastructure Test" disabled={busy || !session || !registered} onPress={runTest} /></View>
     <Text style={styles.message}>{message}</Text>
     {stages.map((stage) => <View style={styles.stage} key={stage.label}><Text style={styles.stageTitle}>{stage.ok ? '✓' : '○'} {stage.label}</Text><Text>{stage.value}</Text></View>)}

@@ -145,6 +145,7 @@ test('every recovery phase gates ordinary home/settings, even with a ready app s
   let phase='idle', status='ready'; const Stack = p => ({type:'Stack',props:p}); Stack.Screen='Screen'; Stack.Protected='Protected';
   const modules={
     'react/jsx-runtime':{jsx,jsxs:jsx},'expo-router':{Stack},'expo-notifications':{setNotificationHandler(){}},
+    '../lib/notification-runtime': { notificationService: { canPresent: () => false } },
     '../lib/session':{SessionProvider:p=>p.children,useSession:()=>({status,session:session()})},
     '../lib/session-store':load('session-store'),
     '../lib/auth-link-context':{AuthLinkProvider:p=>p.children,useAuthLink:()=>({phase})},
@@ -171,6 +172,7 @@ test('Settings screen edits validated fields, explains policy, renders read-only
   const modules={
     'react/jsx-runtime':{jsx,jsxs:jsx},'react':{useState:initial=>{const i=index++; if (!(i in slots)) slots[i]=initial; return [slots[i],v=>{slots[i]=v;}];},useRef:initial=>{const i=index++;return slots[i]??=( {current:initial} );}},
     'react-native':{Text:'Text',Button:'Button'},'expo-router':{Link:'Link'},
+    '../components/notification-controls': { NotificationControls: 'NotificationControls' },
     '../components/form':{Field:'Field',Form:'Form',Message:p=>p.text,styles:{}},'../lib/api':load('api'),'../lib/profile-input':load('profile-input'),
     '../lib/session':{useSession:()=>({...x.store.snapshot(),store:x.store})},
   };
