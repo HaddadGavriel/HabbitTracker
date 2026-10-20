@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Header
 
 from ..auth import AuthenticatedUser, get_current_user
 from ..dependencies import get_database
+from ..local_reminder_schemas import LocalReminderPlan
 from ..occurrence_schemas import CompletionSet, OccurrenceResult, ProgressAdjustment, ProgressSet, TodayResult
 from ..services.supabase import OccurrenceError, SupabaseDatabase
 from .profiles import error
@@ -54,3 +55,8 @@ async def adjust(occurrence_id: UUID, body: ProgressAdjustment,
                  idempotency_key: Annotated[str, Header(pattern=r"^[A-Za-z0-9._:-]{1,128}$")],
                  user: AuthenticatedUser = Depends(get_current_user), database: SupabaseDatabase = Depends(get_database)):
     return await result(database.mutate_occurrence(user.id, str(occurrence_id), "adjustment", body.delta, idempotency_key))
+
+
+@router.get("/local-reminder-plan", response_model=LocalReminderPlan)
+async def local_reminder_plan(user: AuthenticatedUser = Depends(get_current_user), database: SupabaseDatabase = Depends(get_database)):
+    return await result(database.get_local_reminder_plan(user.id))

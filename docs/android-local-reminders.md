@@ -1,0 +1,206 @@
+# Durable Android local reminder foundation
+
+This PR adds scheduling and its authoritative inputs. It does not enable local
+reminders from product screens yet. The next PR must connect session restoration,
+explicit device preferences, permission flows, every habit/lifecycle/profile action,
+foreground server refresh, and local taps to this API. Existing friend reminders
+continue through their existing remote service; this engine never calls that API.
+Habit configuration still requires at least one reminder time, independently of
+OS permission, channel settings or an installation's notification preference.
+
+## Authoritative plan
+
+`GET /local-reminder-plan` requires the existing bearer authentication and profile.
+The backend alone derives the owner. The new service-role-only RPC takes the same
+owner lock as habit/profile changes and calls the existing stable-date Today
+reconciliation. It returns version, owner ID, authoritative database server time,
+profile IANA timezone/current date, and two minimal scheduling projections:
+
+- `effective`: every still-open stored occurrence's date, timezone, deadline and
+  snapshotted reminder times. This deliberately includes a different local date
+  retained after travel. It includes completed/excused occurrences too: the product
+  contract asks for all configured reminders, with no local completion suppression.
+- `future`: active habits' current schedule, ISO weekdays, times, and public
+  `eligible_from` boundary. This boundary is at least tomorrow in the profile zone,
+  the private cursor's next date, and the timezone transition floor. No private
+  cursor objects, historical reconciliation details or future occurrences escape.
+
+An absent effective row means no current obligation; a configuration edit cannot
+invent one. Archive retains an effective occurrence but removes future rules.
+Creation/cutover and repeated timezone transitions cannot rewind eligibility.
+No future occurrence rows are inserted; no local completion, progress or streaks
+are calculated. No previously applied migration is edited. Apply the new migration
+only through a separately authorized release process, before distributing consumers.
+
+## Native engine and persistence
+
+`mobile/modules/local-reminders` is an Expo local module, automatically linked on
+Android. Its manifest supplies receivers/permissions; no custom prebuild patch is
+needed. Expo Go, web, and iOS have no engine (`localReminders` is null).
+
+The pure Java `Planner` is used by the actual native adapter. It selects the next
+batch directly from unbounded recurrence rules, using `java.time` with core-library
+desugaring for supported Android versions. The phone timezone is never an input.
+DST gaps shift by the gap duration (02:30 becomes 03:30 for a one-hour gap).
+Overlaps use the earlier offset once. Entirely skipped civil dates are skipped.
+An effective reminder cannot occur at or after its original deadline.
+
+The native `Journal` holds a cursor and the next derived batch. A complete owner,
+lease, plan, clock anchor and cursor are written through Android `AtomicFile` in
+`noBackupFilesDir`, before scheduling. There are no stored credentials or push
+identities. Event identities are deterministic owner/habit/date/configured-time
+strings; an overlap cannot duplicate them. A single stable immutable PendingIntent
+replaces the one earliest OS alarm. Repeating reconciliation cannot grow a queue.
+An old account lease cannot replace/cancel a new account's schedule; cancellation
+persists a tombstone before OS cleanup. A fresh acquire after cancellation creates
+a new lease. Older server plans cannot overwrite a newer plan.
+
+The alarm receiver computes subsequent reminders and re-arms natively. Boot,
+package replacement, clock/timezone changes, and exact-alarm grant broadcasts
+restore from disk. Unique WorkManager registration is awaited before acquire succeeds. Persistent
+WorkManager work repairs an interrupted
+write/arm/delivery transition without requiring JavaScript. This is a recovery
+mechanism, not a finite notification horizon. Each pass drains at most 64 batches;
+remaining work stays durable and reports `catchup_pending` for subsequent recovery.
+The receiver holds a short bounded wake lock. A process killed between delivery
+and cursor commit can retry the same notification; absolute exactly-once physical
+notification delivery is not possible across that OS boundary.
+
+There is only one outstanding alarm and one local notification slot. Simultaneous
+reminders are represented by one counted notification; delayed batches accumulate
+a persistent unread count instead of exceeding Android's active-notification cap.
+The count is journaled before posting and keyed by batch instant so retry cannot
+increment it twice. Tapping and consuming launch metadata acknowledges the count.
+Scheduling exceptions/capacity failures retain desired state and report
+`repair_required`; nothing is silently truncated to a platform queue length.
+
+## Native API for the integration PR
+
+1. Call `acquire(authenticatedOwnerId)` after deciding this installation is enabled.
+   Persisted ownership survives process death. Switching owners invalidates old work.
+2. Call `clock()` immediately before the authenticated `readLocalReminderPlan` read.
+3. Pass the lease, JSON plan and that monotonic clock sample to `replace`.
+   Validation completes before writing. Samples older than two minutes are rejected.
+4. Call `status()` for foreground repair/status. It never prompts for permission.
+5. Call `cancel(lease)` for explicit disable/logout. Await/handle failures. It cancels
+   the alarm, periodic repair and presented local notification. Do not acquire a
+   different account until the product knows its intended local preference.
+6. Listen for native `onLaunch` signals and consume `launchMetadata()` after startup
+   and on native notification launches; validate it using
+   `localReminderDestination(metadata, currentAuthenticatedOwnerId)`, then use the
+   existing authenticated Today flow. The native launch itself opens the app only.
+   Metadata has a validated owner UUID, fixed type and fixed Today target; payload
+   URLs and arbitrary route names are not used. Product tap wiring is deferred.
+
+Server time anchors scheduling; elapsed realtime prevents manual phone-clock edits
+from changing it within the same boot. The server sample is a lower-bound anchor at receipt: network delay can make
+delivery late by up to the full sampled request duration, returned as
+`clockUncertaintyMs`. The engine does not guess a one-way delay that could fire
+early or skip an imminent reminder. After reboot, restoration estimates elapsed time using
+the saved wall clock and reports `clock_unverified` until a new server plan arrives.
+Offline native code cannot establish authoritative current server time after reboot.
+The OS timezone database must be current. Changes made on another device need a
+new authenticated plan; this engine has no remote mutation subscription.
+
+## Honest platform statuses and limits
+
+`scheduled_os_limited` means Android accepted an exact alarm, not that delivery was
+observed or guaranteed. `inexact` means exact-alarm access was unavailable and
+`setAndAllowWhileIdle` was used. `permission_blocked` means app or local channel
+notifications are disabled; configured habit times remain intact. `awaiting_plan`,
+`idle` (no upcoming reminders), `clock_unverified`, `catchup_pending`, `repair_required`, `stale_lease`, and
+`cancelled` describe other explicit states. Product integration must show these
+states rather than interpreting every resolved native call as success.
+
+Exact alarms use `SCHEDULE_EXACT_ALARM`, never the policy-restricted `USE_EXACT_ALARM`.
+There is no automatic special-access prompt. Android idle quotas can delay closely
+spaced configured times even with exact access; inexact alarms and WorkManager can
+be deferred further. Deferred reminders are counted during recovery. Device off,
+force-stop, OEM battery restrictions and app-data deletion cannot promise delivery.
+Android force-stop prevents restoration until the user launches the app again;
+app data deletion/reinstall removes the local schedule. The periodic worker may
+be delayed in Doze and is not a delivery SLA. No screen, JS timer, rolling finite
+queue, or iOS calendar trigger is the basis of continued scheduling.
+
+## Verification
+
+Run `npm ci`, `npm test`, and `npm run typecheck` in mobile. With JDK installed,
+`bash scripts/test-local-reminders.sh` compiles and runs the exact production pure
+planner/journal with injected persistence, scheduling and process-restart faults.
+Run the backend suite with all migrations in a fresh disposable PostgreSQL database
+using `backend/tests/postgres_scaffold.sql`, including its default table grants.
+Never point these tests at a shared database.
+
+The `Local reminder native verification` GitHub workflow installs JDK 17/21 and
+Android tools, generates an ignored Android project with a fake Firebase file,
+and runs `:local-reminders:testDebugUnitTest :local-reminders:assembleDebug`.
+`AndroidAdapterTest` exercises the production adapter against Robolectric’s Android
+framework: atomic persistence, alarm restoration/cancellation, ownership fencing,
+notification/channel denial and exact-alarm denial.
+These tests do not establish device delivery. A local equivalent is:
+
+```sh
+cd mobile
+npm ci
+export RUNNER_TEMP=/absolute/path/to/scratch
+node scripts/native-test-config.cjs
+GOOGLE_SERVICES_JSON="$RUNNER_TEMP/reminder-google-services.json" npx expo prebuild --platform android --no-install
+cd android
+./gradlew :local-reminders:testDebugUnitTest :local-reminders:assembleDebug
+```
+
+For engine-only verification without React Native artifacts, after prebuild run
+`REMINDER_NATIVE_WORK_DIR="$RUNNER_TEMP/reminder-native" bash scripts/verify-reminder-android.sh`
+from mobile. This copies the unchanged production Engine/Planner/Journal sources
+and Android adapter tests into a standalone Android library and assembles/tests
+that library. It excludes only the Expo bridge. CI runs both paths, and uploads
+reports even if the subsequent full Expo module build fails.
+
+For a distributable native app, supply the real Firebase configuration and follow
+the existing Android build guide. The generated project is not committed. Device
+verification must cover process death without force-stop, reboot, force-stop then
+relaunch, exact permission denial/revocation, notification/channel blocking,
+phone/profile timezone differences, DST, multiple close times in Doze, account
+replacement, cancellation, and capacity/partial-failure recovery. No device delivery,
+real remote send, deployment, shared migration or merge is claimed by this PR.
+
+## Actual results for this PR
+
+Based on merged main `ff5d531` (PR #28), verified against origin before changes:
+
+- All 1,660 backend tests passed against a fresh disposable PostgreSQL 16 database
+  with all migrations and the repository's Supabase-style table/function grants.
+- All 31 mobile test files passed; TypeScript checking passed.
+- The production Java planner/journal runner passed on JDK 17, including DST gaps,
+  overlaps and a half-hour transition; phone/profile zone differences; skipped
+  civil dates; selected weekdays; snapshot deadlines; 1,000 simultaneous reminders;
+  stable retries; partial scheduling/persistence failures; and durable backlog.
+- Engine-only Android Kotlin/Java compilation and debug AAR assembly passed.
+  All eight Robolectric adapter tests passed: persistent alarm restoration and
+  cancellation, owner fencing, exact-alarm fallback, reboot clock uncertainty,
+  notification denial, interrupted atomic writes, effective snapshots with a
+  different phone zone, and blocked local-channel preservation of configured times.
+- Expo prebuild and module discovery/configuration succeeded. The full Expo module
+  build was attempted with JDK 17/21, Android SDK 36 and the native toolchain, but
+  could not download the repository's locked `react-android:0.86.3` debug AAR:
+  Maven Central redirects it to `repo.reactnative.dev`, which this environment's
+  network policy rejects with HTTP 403. The Expo bridge/full integration build
+  therefore remains unverified; the standalone path excludes that bridge only.
+
+No physical-device or emulator delivery check ran. No shared migration, deployment,
+remote notification send, or merge was performed. The PR remains draft pending
+full Expo integration build verification and later device verification.
+
+## Official documentation checked on 2026-10-21
+
+- [Expo Notifications](https://docs.expo.dev/versions/latest/sdk/notifications/):
+  `CalendarTriggerInput` and its timezone option are iOS-only. Installed
+  expo-notifications 57.0.21 Android `DailyTrigger`/`WeeklyTrigger` use
+  `Calendar.getInstance()` with the device zone and have no profile-zone input.
+- [Android scheduling guide](https://developer.android.com/develop/background-work/services/alarms):
+  PendingIntent alarms survive application exit; restore alarms after boot, and
+  check exact-alarm special access. Repeating alarms are inexact.
+- [AlarmManager reference](https://developer.android.com/reference/android/app/AlarmManager):
+  allow-while-idle quota/throttling, cancellation, and PendingIntent-based scheduling.
+- [Android 14 exact-alarm changes](https://developer.android.com/about/versions/14/changes/schedule-exact-alarms):
+  special access is denied by default for many installations; check and degrade.

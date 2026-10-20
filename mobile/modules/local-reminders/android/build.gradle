@@ -1,0 +1,23 @@
+apply plugin: 'com.android.library'
+apply plugin: 'expo-module-gradle-plugin'
+
+group = 'com.habbittracker.reminders'
+version = '1.0.0'
+android {
+  namespace 'com.habbittracker.reminders'
+  defaultConfig { versionCode 1; versionName '1.0.0'; consumerProguardFiles 'consumer-rules.pro' }
+  compileOptions {
+    coreLibraryDesugaringEnabled true
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+  testOptions { unitTests.includeAndroidResources = true }
+}
+dependencies {
+  implementation 'androidx.core:core-ktx:1.17.0'
+  implementation 'androidx.work:work-runtime-ktx:2.11.1'
+  coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
+  testImplementation 'junit:junit:4.13.2'
+  testImplementation 'org.robolectric:robolectric:4.16.1'
+  testImplementation 'androidx.work:work-testing:2.11.1'
+}

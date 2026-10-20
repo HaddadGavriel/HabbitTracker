@@ -6,7 +6,9 @@ only listens for infrastructure-test receipts. Merely opening either screen does
 not prompt for permission. An explicit **Enable notifications** action records
 opt-in for the current account on this installation. Logout/account switching and
 permission denial clear that opt-in. A normal restart of the same signed-in
-account retains it. There is no local scheduling.
+account retains it. The remote service does not schedule local reminders. The
+[durable Android local-reminder foundation](android-local-reminders.md) is a separate
+engine; product-action integration follows in the next PR.
 
 ## Setup and release order
 

@@ -57,8 +57,9 @@ Reminder times and weekdays are **local wall-clock settings in the owner's curre
 profile IANA timezone**. They are not UTC timestamps and do not include offsets or
 timezones of their own. Changing the profile timezone changes subsequent occurrences
 according to the transition policy; existing occurrences keep their snapshots.
-Occurrence deadlines account for daylight-saving transitions. Notification
-execution belongs to a future delivery milestone.
+Occurrence deadlines account for daylight-saving transitions. The
+[Android local-reminder engine](android-local-reminders.md) projects these rules
+without changing the requirement for configured times; product wiring follows separately.
 
 Daily schedules with nonempty weekdays and selected schedules with empty weekdays
 are contradictory and rejected. Duplicate weekdays/reminders are rejected rather
