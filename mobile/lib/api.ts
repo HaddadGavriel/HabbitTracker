@@ -93,6 +93,9 @@ export const readProfile = (session: Session) =>
 export const createProfile = (session: Session, profile: ProfileCreate) =>
   request<ProfileResult>('/profiles/me', session, { method: 'POST', body: JSON.stringify(profile) });
 
+export const updateProfile = (session: Session, profile: ProfileCreate) =>
+  request<ProfileResult>('/profiles/me', session, { method: 'PATCH', body: JSON.stringify(profile) });
+
 /** Search and relationships expose only this public identity, never full profiles. */
 export type PublicProfile = { user_id: string; username: string; display_name: string };
 

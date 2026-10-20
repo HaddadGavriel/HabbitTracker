@@ -593,6 +593,7 @@ test('history route is protected by the ready-profile guard and navigation is ke
     'expo-notifications': { setNotificationHandler() {} },
     '../lib/session': { SessionProvider: 'SessionProvider', useSession: () => current },
     '../lib/session-store': { routeAccess },
+    '../lib/auth-link-context': { AuthLinkProvider: p => p.children, useAuthLink: () => ({ phase: 'idle' }) },
   };
   const Layout = compile('app/_layout.tsx', name => modules[name]).default;
   for (const status of ['startup', 'loading', 'signed_out', 'profile_required', 'failure', 'ready']) {

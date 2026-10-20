@@ -1,11 +1,11 @@
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { AppState } from 'react-native';
-import { createProfile, readProfile } from './api';
+import { createProfile, readProfile, updateProfile } from './api';
 import { supabase } from './supabase';
 import { SessionStore } from './session-store';
 const Context = createContext<SessionStore | null>(null);
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [store] = useState(() => new SessionStore(supabase.auth, { readProfile, createProfile }));
+  const [store] = useState(() => new SessionStore(supabase.auth, { readProfile, createProfile, updateProfile }));
   useEffect(() => {
     void store.start();
     const refresh = (state: string) => state === 'active' ? supabase.auth.startAutoRefresh() : supabase.auth.stopAutoRefresh();

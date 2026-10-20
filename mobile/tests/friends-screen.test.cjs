@@ -312,6 +312,7 @@ test('Home links to Friends and shared habits; friendship and sharing routes req
     '../components/form': { Form: 'Form', styles: {} },
     '../lib/session': { SessionProvider: ({ children }) => children, useSession: () => state },
     '../lib/session-store': { routeAccess },
+    '../lib/auth-link-context': { AuthLinkProvider: props => props.children, useAuthLink: () => ({ phase: 'idle' }) },
   };
   const requireModule = name => { assert.ok(dependencies[name], `Unexpected route dependency: ${name}`); return dependencies[name]; };
   const Layout = compile('app/_layout.tsx', requireModule).default;
