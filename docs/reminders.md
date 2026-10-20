@@ -2,9 +2,9 @@
 
 A currently authorized friend can ask the backend to send a short Expo push
 notification to the owner of a shared habit. This is an explicit request, not a
-scheduler: `reminder_times` configuration does not send notifications. There are
-no mobile screens, local scheduling, background retries, or receipt polling in
-this milestone.
+scheduler: `reminder_times` configuration does not send notifications. Mobile registration controls are in Settings; see [account-aware notification
+registration and cleanup](mobile-notifications.md). Friend-send screens, local
+scheduling, background resend, and receipt polling remain deferred.
 
 ## HTTP contract
 
@@ -133,19 +133,13 @@ status while the original request finishes; it never becomes a new dispatch.
 The transaction reserves and snapshots the recipient's device registrations and
 server-generated notification first. Only after that transaction commits does
 FastAPI call Expo, **outside database locks**, then persist per-device outcomes
-and a compact summary. The notification title is `Habit reminder`; its short body combines the sender's
-current display name and the occurrence's snapshotted habit name, with control
-characters removed and lengths bounded. Clients cannot supply that content.
-Structured data supports future mobile navigation:
-
-```json
-{
-  "type": "habit_reminder",
-  "reminder_id": "8999444f-cdea-4377-8235-e12e08aebdb6",
-  "habit_id": "8cab1bce-89d6-44ea-9150-e774b49bd148",
-  "occurrence_id": "e235e79a-18d2-4d91-9391-bec860d662d9"
-}
-```
+and a compact summary. Outgoing pushes use the `friend-reminders` channel and a
+generic title/body: `Habit Tracker` / `Open Habit Tracker to check your updates.`
+Only `{"type":"habit_reminder"}` is sent as data. The backend discards names and
+navigation identifiers at dispatch, including for detailed snapshots stored by
+older versions. This limits disclosure if a previously authorized push arrives
+after logout/account switching. Private database audit snapshots are not exposed
+to the device or public API. See the [delivery boundary](mobile-notifications.md#delivery-boundary-and-privacy).
 
 The backend makes no automatic resend after a timeout, transport interruption,
 5xx response, malformed provider response, or another ambiguous result. Some or
@@ -212,20 +206,23 @@ occurrence, excuse, and streak responses remain compatible.
 ## Migration, deployment, and tests
 
 For a separately authorized release, apply all unapplied migrations in filename
-order, through `supabase/migrations/202610090001_friend_reminders.sql`, **before**
-deploying this backend version. This follows PR #12's
+order, through `supabase/migrations/202610200001_device_registration_cleanup.sql`, **before**
+deploying this backend version. The friend-reminders migration follows PR #12's
 `202610080002_occurrence_history_streaks.sql`. Do not rewrite or reapply recorded
 migrations. The migration adds persistent reminder reservations/results, their
 constraints and indexes, restricted RPCs, and globally unique token registration.
 The token deduplication keeps one registration for each token; review that behavior
 before release if the shared database contains historical duplicate registrations.
 No shared database migration or deployment is part of implementation verification.
-Coordinate the rollout with a brief maintenance window for device registration:
-the migration revokes direct device-table writes, so the previous backend's
-registration adapter stops working until this RPC-based version is deployed.
+When upgrading from a release before the friend-reminders migration, coordinate
+a brief maintenance window for device registration: that migration revokes direct
+device-table writes, so a legacy direct-write adapter stops working until the
+RPC-based backend is deployed. The subsequent cleanup migration retains the
+three-argument registration RPC for compatibility.
 Rolling back to the old direct-write adapter requires a separate compatibility
 plan; do not relax client privileges to work around it.
-No new environment variable is required; the backend retains the configured
+The cleanup migration adds guarded intent registration and authenticated unregister;
+see [release order and recovery](mobile-notifications.md). No new environment variable is required; the backend retains the configured
 `EXPO_PUSH_URL` and Supabase secret-key adapter.
 
 Use the [disposable PostgreSQL setup](friendships.md#migration-and-tests), with
@@ -259,8 +256,8 @@ successful request sends an actual push. Obtain `$Token1` (owner) and `$Token2`
 (friend) using the [README sign-in flow](../README.md#test-profiles-with-two-existing-auth-users-powershell).
 Both users need profiles. Use dedicated test users/habits and never commit tokens,
 passwords, or Expo device tokens. Register notifications on User 1's signed-in
-Android device using the existing infrastructure app, or register its actual
-Expo token explicitly:
+Android device using Settings → Enable notifications. For an explicitly authorized
+manual API check, retain a fresh registration UUID before sending its actual token:
 
 ```powershell
 $ApiUrl = "http://127.0.0.1:8000" # Or the authorized deployed backend.
@@ -271,8 +268,9 @@ $User2 = Invoke-RestMethod -Uri "$ApiUrl/profiles/me" -Headers $Headers2
 
 # Skip when already registered by the owner's app.
 $OwnerExpoToken = "ExponentPushToken[YOUR_REAL_DEVICE_TOKEN]"
+$RegistrationId = [guid]::NewGuid().ToString()
 Invoke-RestMethod -Method Post -Uri "$ApiUrl/devices/register" -Headers $Headers1 `
-  -Body (@{ expo_push_token = $OwnerExpoToken; platform = "android" } | ConvertTo-Json)
+  -Body (@{ expo_push_token = $OwnerExpoToken; platform = "android"; registration_id = $RegistrationId } | ConvertTo-Json)
 
 # Skip these two calls if the users are already accepted friends.
 $Request = Invoke-RestMethod -Method Post -Uri "$ApiUrl/friend-requests" -Headers $Headers1 `
@@ -341,7 +339,10 @@ sender/habit's cooldown without contacting Expo.
 For account switching, sign the same device into User 2 and register notifications
 again with the **same token**, then inspect via a privileged SQL console that
 `device_push_tokens` has exactly one row for that token and its owner is User 2.
-Alternatively repeat `POST /devices/register` with `$Headers2` and the same token.
+Alternatively repeat `POST /devices/register` with `$Headers2`, the same token,
+and a fresh `registration_id`. A later unregister of User 1's old identity must
+leave User 2's registration intact. In the app, unresolved old-account cleanup
+blocks enabling on the new account until cleanup can be confirmed.
 Do not print or commit the token. Switch back and register as User 1 to restore the
 manual setup. Direct `anon`/`authenticated` table and reminder-RPC access must be
 denied. Do not run arbitrary provider-failure experiments against a real token;

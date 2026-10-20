@@ -17,6 +17,7 @@ class ExpoPushService:
         payload = {
             "to": token,
             "sound": "default",
+            "channelId": "infrastructure-tests",
             "title": "Infrastructure Test Passed",
             "body": f"Request {request_id} completed successfully.",
             "data": {"request_id": request_id, "server_timestamp": server_timestamp},
@@ -26,7 +27,7 @@ class ExpoPushService:
         response.raise_for_status()
         ticket = response.json().get("data", {})
         if ticket.get("status") != "ok":
-            raise RuntimeError(f"Expo rejected push notification: {ticket.get('message', 'unknown error')}")
+            raise RuntimeError("Expo rejected the infrastructure notification")
         return ticket.get("id")
 
     async def send_reminder(self, devices: list[dict], notification: dict) -> list[dict]:
@@ -57,9 +58,12 @@ class ExpoPushService:
                     {
                         "to": devices[index]["expo_push_token"],
                         "sound": "default",
-                        "title": notification["title"],
-                        "body": notification["body"],
-                        "data": notification["data"],
+                        # A reserved push can arrive after logout/account transfer.
+                        # Sanitize here, including reservations from older servers.
+                        "channelId": "friend-reminders",
+                        "title": "Habit Tracker",
+                        "body": "Open Habit Tracker to check your updates.",
+                        "data": {"type": "habit_reminder"},
                     }
                     for index in indexes
                 ]

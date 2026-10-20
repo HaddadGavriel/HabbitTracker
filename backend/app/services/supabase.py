@@ -60,10 +60,21 @@ class SupabaseDatabase:
             "Content-Type": "application/json",
         }
 
-    async def register_device(self, user_id: str, token: str, platform: str) -> datetime:
-        response = await self._rpc("register_device", {"p_user": user_id, "p_token": token, "p_platform": platform})
+    async def register_device(self, user_id: str, token: str, platform: str, registration_id: str) -> datetime | None:
+        response = await self._rpc("register_device_intent", {"p_user": user_id, "p_token": token, "p_platform": platform, "p_registration": registration_id})
         response.raise_for_status()
-        return datetime.fromisoformat(response.json().replace("Z", "+00:00"))
+        value = response.json()
+        if value is not None and not isinstance(value, str):
+            raise ValueError("Invalid registration result")
+        return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+
+    async def unregister_device(self, user_id: str, registration_id: str) -> bool:
+        response = await self._rpc("unregister_device", {"p_user": user_id, "p_registration": registration_id})
+        response.raise_for_status()
+        value = response.json()
+        if not isinstance(value, bool):
+            raise ValueError("Invalid unregistration result")
+        return value
 
     async def _reminder_rpc(self, function: str, body: dict) -> dict | None:
         codes = ("profile_not_found", "invalid_idempotency_key", "reminder_not_eligible",

@@ -7,7 +7,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   version: "0.1.0",
   orientation: "portrait",
   scheme: "habittrackerinfra",
-  plugins: ["expo-router", "expo-notifications"],
+  plugins: ["expo-router", ["expo-notifications", { defaultChannel: "friend-reminders" }]],
   android: {
     package: "com.haddadgavriel.habittracker",
     // EAS file variables resolve to a temporary path on the remote builder.
@@ -18,6 +18,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   extra: {
     router: { origin: false },
-    eas: { projectId: "4f31560d-6323-41f7-ae0a-f792a4814c98" },
+    eas: { projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID ?? "4f31560d-6323-41f7-ae0a-f792a4814c98" },
   },
 });

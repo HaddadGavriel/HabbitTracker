@@ -591,6 +591,7 @@ test('history route is protected by the ready-profile guard and navigation is ke
     'react/jsx-runtime': runtime,
     'expo-router': { Stack: StackComponent },
     'expo-notifications': { setNotificationHandler() {} },
+    '../lib/notification-runtime': { notificationService: { canPresent: () => false } },
     '../lib/session': { SessionProvider: 'SessionProvider', useSession: () => current },
     '../lib/session-store': { routeAccess },
     '../lib/auth-link-context': { AuthLinkProvider: p => p.children, useAuthLink: () => ({ phase: 'idle' }) },

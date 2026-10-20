@@ -61,3 +61,9 @@ Reviewed current official documentation and the matching installed SDK source/AP
 - [Supabase Auth 2.117.2 official source](https://github.com/supabase/supabase-js/blob/v2.117.2/packages/core/auth-js/src/GoTrueClient.ts): reviewed the installed copy's `verifyOtp`, `setSession`, `getUser`, `resend`, `resetPasswordForEmail`, `updateUser`, and client disposal behavior.
 - [Expo SDK 57 Linking](https://docs.expo.dev/versions/v57.0.0/sdk/linking/) and [linking into your app](https://docs.expo.dev/linking/into-your-app/): initial URL and URL subscriptions with a registered custom scheme.
 - [Expo Router native intent](https://docs.expo.dev/router/advanced/native-intent/) and [protected routes](https://docs.expo.dev/router/advanced/protected/): checked against installed Router 57 native-intent/link subscription and protected-stack implementation.
+
+Notification controls are also available in Settings. See [mobile notifications](mobile-notifications.md)
+for explicit permission/enable, Android settings, session-aware registration,
+owner-scoped unregister, and offline sign-out recovery. Diagnostics uses the same
+service. A cleanup warning can remain visible after successful local sign-out;
+local Auth state and confirmed remote device removal are separate outcomes.

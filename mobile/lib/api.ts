@@ -347,9 +347,14 @@ export const archiveHabit = (session: Session, id: string) =>
 export const restoreHabit = (session: Session, id: string) =>
   request<HabitResult>(`/habits/${encodeURIComponent(id)}/restore`, session, { method: 'POST' });
 
-export const registerDevice = (session: Session, expoPushToken: string) =>
-  request<{ registered: boolean; updated_at: string }>('/devices/register', session, {
-    method: 'POST', body: JSON.stringify({ expo_push_token: expoPushToken, platform: 'android' }),
+export const registerDevice = (session: Session, expoPushToken: string, registrationId: string, platform: 'android' | 'ios') =>
+  request<{ registered: boolean; registration_id: string; updated_at: string }>('/devices/register', session, {
+    method: 'POST', body: JSON.stringify({ expo_push_token: expoPushToken, registration_id: registrationId, platform }),
+  });
+
+export const unregisterDevice = (session: Session, registrationId: string) =>
+  request<{ removed: boolean }>('/devices/unregister', session, {
+    method: 'POST', body: JSON.stringify({ registration_id: registrationId }),
   });
 
 export type TestResult = {

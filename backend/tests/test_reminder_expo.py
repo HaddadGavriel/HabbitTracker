@@ -41,7 +41,8 @@ async def test_reminder_posts_server_notification_and_safe_device_results(monkey
         assert request.headers["accept"] == "application/json"
         assert request.headers["accept-encoding"] == "gzip, deflate"
         assert json.loads(request.content) == [
-            {"to": item["expo_push_token"], "sound": "default", **NOTIFICATION}
+            {"to": item["expo_push_token"], "sound": "default", "channelId": "friend-reminders",
+             "title": "Habit Tracker", "body": "Open Habit Tracker to check your updates.", "data": {"type": "habit_reminder"}}
             for item in devices
         ]
         return httpx.Response(200, json={"data": [
@@ -256,7 +257,7 @@ async def test_large_batches_continue_after_a_provider_failure(monkeypatch, fail
 async def test_existing_infrastructure_send_contract_is_unchanged(monkeypatch):
     def handler(request):
         assert json.loads(request.content) == {
-            "to": "ExponentPushToken[infrastructure]", "sound": "default",
+            "to": "ExponentPushToken[infrastructure]", "sound": "default", "channelId": "infrastructure-tests",
             "title": "Infrastructure Test Passed", "body": "Request request-1 completed successfully.",
             "data": {"request_id": "request-1", "server_timestamp": "2026-10-09T00:00:00Z"},
         }

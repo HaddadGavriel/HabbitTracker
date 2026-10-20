@@ -4,15 +4,26 @@ from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from uuid import UUID
+from uuid import UUID, uuid4
 
 
 class DeviceRegistration(BaseModel):
+    registration_id: UUID = Field(default_factory=uuid4)
     expo_push_token: str = Field(max_length=256, pattern=r"^(ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]+\]$")
     platform: Literal["android", "ios"]
 
 
+class DeviceUnregistration(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    registration_id: UUID
+
+
+class DeviceUnregistrationResult(BaseModel):
+    removed: bool
+
+
 class DeviceRegistrationResult(BaseModel):
+    registration_id: UUID
     registered: bool = True
     platform: str
     updated_at: datetime

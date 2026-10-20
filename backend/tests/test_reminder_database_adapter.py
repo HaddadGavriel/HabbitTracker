@@ -17,6 +17,8 @@ from test_reminders import (
 )
 
 
+REGISTRATION = "11111111-1111-4111-8111-111111111111"
+
 RESERVATION = {"dispatch": True, "result": SUMMARY, "devices": DEVICES, "notification": NOTIFICATION}
 OPERATIONS = [
     ("reserve_habit_reminder", (SENDER, HABIT, KEY),
@@ -168,13 +170,13 @@ async def test_device_registration_uses_atomic_reassignment_rpc_and_database_tim
 
     def handler(request):
         calls.append(request)
-        assert request.method == "POST" and request.url.path == "/rest/v1/rpc/register_device"
+        assert request.method == "POST" and request.url.path == "/rest/v1/rpc/register_device_intent"
         assert request.headers["apikey"] == "sb_secret_test" and "authorization" not in request.headers
-        assert json.loads(request.content) == {"p_user": OWNER, "p_token": TOKEN, "p_platform": platform}
+        assert json.loads(request.content) == {"p_user": OWNER, "p_token": TOKEN, "p_platform": platform, "p_registration": REGISTRATION}
         return httpx.Response(200, json=NOW)
 
     transport(monkeypatch, handler)
-    assert await db().register_device(OWNER, TOKEN, platform) == datetime(2026, 10, 9, 10, tzinfo=timezone.utc)
+    assert await db().register_device(OWNER, TOKEN, platform, REGISTRATION) == datetime(2026, 10, 9, 10, tzinfo=timezone.utc)
     assert len(calls) == 1
 
 
@@ -184,18 +186,18 @@ def test_registration_still_works_before_profile_and_derives_account_from_authen
     def handler(request):
         calls.append(request)
         # No profile requirement or client timestamp is introduced.
-        assert request.url.path == "/rest/v1/rpc/register_device"
-        assert json.loads(request.content) == {"p_user": SENDER, "p_token": TOKEN, "p_platform": "android"}
+        assert request.url.path == "/rest/v1/rpc/register_device_intent"
+        assert json.loads(request.content) == {"p_user": SENDER, "p_token": TOKEN, "p_platform": "android", "p_registration": REGISTRATION}
         return httpx.Response(200, json=NOW)
 
     transport(monkeypatch, handler)
     app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(id=SENDER)
     app.dependency_overrides[get_database] = db
     with TestClient(app) as client:
-        response = client.post("/devices/register", json={"expo_push_token": TOKEN, "platform": "android", "user_id": OWNER},
+        response = client.post("/devices/register", json={"expo_push_token": TOKEN, "platform": "android", "user_id": OWNER, "registration_id": REGISTRATION},
             headers={"X-User-Id": OWNER}, params={"p_user": OWNER})
     assert response.status_code == 200
-    assert response.json() == {"registered": True, "platform": "android", "updated_at": NOW}
+    assert response.json() == {"registered": True, "platform": "android", "updated_at": NOW, "registration_id": REGISTRATION}
     assert len(calls) == 1
 
 
@@ -223,4 +225,4 @@ def test_device_registration_rejects_invalid_tokens_without_database_access(monk
 async def test_device_registration_database_failures_are_not_success(monkeypatch, status, body):
     transport(monkeypatch, lambda request: httpx.Response(status, json=body))
     with pytest.raises(httpx.HTTPStatusError):
-        await db().register_device(OWNER, TOKEN, "android")
+        await db().register_device(OWNER, TOKEN, "android", REGISTRATION)

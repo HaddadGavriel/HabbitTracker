@@ -309,7 +309,8 @@ test('normal navigation reaches the shared list and both shared routes require a
   const Stack = { Screen: 'Screen', Protected: 'Protected' };
   const modules = {
     'react/jsx-runtime': runtime, 'expo-router': { Link: 'Link', Stack }, 'react-native': native,
-    'expo-notifications': { setNotificationHandler() {} }, '../components/form': form,
+    'expo-notifications': { setNotificationHandler() {} },
+    '../lib/notification-runtime': { notificationService: { canPresent: () => false } }, '../components/form': form,
     '../lib/session-store': { routeAccess },
     '../lib/auth-link-context': { AuthLinkProvider: props => props.children, useAuthLink: () => ({ phase: 'idle' }) },
     '../lib/session': { SessionProvider: props => props.children, useSession: () => state },
