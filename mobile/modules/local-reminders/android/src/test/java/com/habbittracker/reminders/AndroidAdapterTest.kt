@@ -13,6 +13,7 @@ import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
 import org.robolectric.annotation.RealObject
 import org.robolectric.shadow.api.Shadow
+import org.robolectric.util.ReflectionHelpers.ClassParameter
 import org.robolectric.shadows.ShadowNotificationManager
 import android.os.SystemClock
 import android.provider.Settings
@@ -37,6 +38,7 @@ class AndroidAdapterTest {
   private val owner = "aaaaaaaa-1111-4111-8111-111111111111"
   @Before fun setup() {
     FailingAtomicFile.writesBeforeFailure = -1
+    FailingAtomicFile.silentCommitFailure = false
     FailingNotifications.fail = false
     shadowOf(context.packageManager).addResolveInfoForIntent(
       Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setPackage(context.packageName),
@@ -267,6 +269,16 @@ class AndroidAdapterTest {
     assertNotNull(notification())
   }
 
+  @Test fun silentAtomicCommitFailureCannotReportReplacementSuccess() {
+    val lease = Engine.acquire(context, owner)
+    replace(lease, todayPlan())
+    FailingAtomicFile.silentCommitFailure = true
+    try { replace(lease, todayPlan("08:05")); fail("uncommitted replacement should fail") } catch (_: IOException) {}
+    assertEquals("2026-10-21T00:00:00Z", saved().getJSONObject("plan").getString("server_time"))
+    replace(lease, todayPlan("08:06"))
+    assertEquals(1L, journal().getLong("total"))
+  }
+
   @Test fun presentationFailureAndRefreshRetainOutboxWithoutDoubleCounting() {
     val lease = Engine.acquire(context, owner)
     replace(lease, todayPlan())
@@ -337,12 +349,21 @@ class AndroidAdapterTest {
 @Implements(AtomicFile::class)
 class FailingAtomicFile {
   @RealObject private lateinit var actual: AtomicFile
-  companion object { var writesBeforeFailure = -1 }
+  companion object {
+    var writesBeforeFailure = -1
+    var silentCommitFailure = false
+  }
   @Implementation fun startWrite(): FileOutputStream {
     if (actual.baseFile.name == "local-reminders-v1.json" && writesBeforeFailure >= 0) {
       if (writesBeforeFailure-- == 0) throw IOException("injected atomic persistence failure")
     }
     return Shadow.directlyOn(actual, AtomicFile::class.java, "startWrite")
+  }
+  @Implementation fun finishWrite(stream: FileOutputStream?) {
+    if (actual.baseFile.name == "local-reminders-v1.json" && silentCommitFailure) {
+      silentCommitFailure = false; stream?.close(); return // simulate AtomicFile logging a rename failure
+    }
+    Shadow.directlyOn<Any, AtomicFile>(actual, AtomicFile::class.java, "finishWrite", ClassParameter.from(FileOutputStream::class.java, stream))
   }
 }
 @Implements(NotificationManager::class)

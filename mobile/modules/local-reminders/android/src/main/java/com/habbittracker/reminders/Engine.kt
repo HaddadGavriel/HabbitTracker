@@ -25,12 +25,17 @@ internal object Engine {
   private fun file(c: Context) = AtomicFile(File(c.noBackupFilesDir, "local-reminders-v1.json"))
   private fun write(c: Context, value: JSONObject?) {
     val target = file(c)
+    val payload = value?.toString() ?: "null"
     val output = target.startWrite()
     try {
-      output.write((value?.toString() ?: "null").toByteArray(Charsets.UTF_8))
+      output.write(payload.toByteArray(Charsets.UTF_8))
       output.fd.sync()
       target.finishWrite(output)
     } catch (error: Exception) { target.failWrite(output); throw error }
+    // AtomicFile can log a failed rename/close instead of throwing. Confirm the
+    // committed base file before treating consumption or plan replacement as saved.
+    val committed = target.openRead().bufferedReader().use { it.readText() }
+    if (committed != payload) throw java.io.IOException("Reminder journal commit did not persist")
   }
   private fun read(c: Context): JSONObject? {
     val target = file(c)

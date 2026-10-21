@@ -43,7 +43,8 @@ batch directly from unbounded recurrence rules, using `java.time` with core-libr
 desugaring for supported Android versions. The phone timezone is never an input.
 DST gaps shift by the gap duration (02:30 becomes 03:30 for a one-hour gap).
 Overlaps use the earlier offset once. Entirely skipped civil dates are skipped.
-An effective reminder cannot occur at or after its original deadline.
+An effective reminder's planned instant must precede its original deadline;
+OS-delayed delivery is counted during later catch-up.
 
 The native `Journal` holds an active recurrence cursor, compact overdue recurrence
 windows, and a counted presentation outbox. A complete owner, lease, plan, clock
@@ -51,7 +52,7 @@ anchor and journal are written together through Android `AtomicFile` in
 `noBackupFilesDir`, before scheduling. There are no stored credentials or push
 identities. Event identities are deterministic owner/habit/date/configured-time
 strings; an overlap cannot duplicate them. A single stable immutable PendingIntent
-replaces the one earliest OS alarm. Repeating reconciliation cannot grow a queue.
+replaces the one earliest OS alarm. Repeating reconciliation cannot grow the OS queue.
 Replacement freezes undelivered old rules into finite **time windows**, not a finite
 list of notifications. Each window retains its own cursor and inclusive end; newly
 introduced rules start strictly after the replacement cutover. Repeated refreshes
@@ -66,7 +67,8 @@ new authoritative rules (same habit, date, configured time, zone, schedule and
 deadline). An absent current occurrence cancels that prediction; archive retains
 the current snapshot and removes future recurrence. Older elapsed dates retain
 the rules accepted when they became due: the minimal plan contains no historical
-revocation feed. Remote edits made while offline cannot be reconstructed from
+revocation feed. Once frozen, historical work stays earned across later profile
+date rollbacks too. Remote edits made while offline cannot be reconstructed from
 this projection; a fresh plan governs its current/future coverage. Account
 cancellation always discards all windows and the outbox.
 
@@ -89,7 +91,8 @@ There is only one outstanding alarm and one local notification slot. Simultaneou
 reminders are represented by one counted notification; delayed batches accumulate
 a persistent unread count instead of exceeding Android's active-notification cap.
 Batch consumption, the monotonic total count and a pending-presentation flag commit
-atomically **before** posting. A failed write consumes nothing; a failed post or
+atomically **before** posting. The adapter reads back committed contents because
+`AtomicFile.finishWrite` provides no success result. A failed write consumes nothing; a failed post or
 post-acknowledgement write leaves the counted outbox retryable. Replacement carries
 that outbox unchanged. Retry cannot increment the same batch again, even if the
 new plan changes the batch composition. A tap carries the lease and displayed
@@ -161,7 +164,7 @@ The `Local reminder native verification` GitHub workflow installs JDK 17/21 and
 Android tools, generates an ignored Android project with a fake Firebase file,
 and runs `:local-reminders:testDebugUnitTest :local-reminders:assembleDebug`.
 It then asserts that the built AAR contains `LocalRemindersModule.class` and that
-all 20 or more adapter tests ran with zero failures, errors or skips. The AAR and
+all 21 or more adapter tests ran with zero failures, errors or skips. The AAR and
 XML/HTML test reports are uploaded for inspection.
 `AndroidAdapterTest` exercises the production adapter against Robolectric’s Android
 framework: real adapter serialization/atomic persistence, alarm restoration and
@@ -210,10 +213,11 @@ Based on merged main `ff5d531` (PR #28), verified against origin before changes:
   overdue replacement without retroactive new times; repeated refreshes; 132 daily
   batches with refresh/restart between bounded passes; and durable count/outbox
   recovery across persistence and presentation failures.
-- The updated production Android engine compiled and assembled locally; all 20
+- The updated production Android engine compiled and assembled locally; all 21
   Robolectric adapter tests passed (zero failures, errors or skips), including
-  replacement, 130 batches across multiple passes, actual persistence and notification
-  boundary failures, old tap receipt isolation, and earlier journal migration.
+  replacement, 130 batches across multiple passes, 132 daily batches across a
+  profile date rollback, persistence failures (including a silently failed commit),
+  notification failures, old tap receipt isolation, and earlier journal migration.
 - The CI setup fix in `7a43ad82` is preserved (`packages: platform-tools`). Its
   [native workflow run](https://github.com/HaddadGavriel/HabbitTracker/actions/runs/39515322237)
   succeeded, including the full Expo module build and Android adapter tests.
