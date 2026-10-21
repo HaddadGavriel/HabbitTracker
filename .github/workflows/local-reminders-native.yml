@@ -1,0 +1,63 @@
+name: Local reminder native verification
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: |
+            17
+            21
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - run: npm ci
+      - run: bash scripts/test-local-reminders.sh
+      - name: Generate native project with nonproduction Firebase placeholder
+        run: |
+          node scripts/native-test-config.cjs
+          GOOGLE_SERVICES_JSON="$RUNNER_TEMP/reminder-google-services.json" npx expo prebuild --platform android --no-install
+      - name: Compile production Android engine and run adapter tests independently
+        run: REMINDER_NATIVE_WORK_DIR="$RUNNER_TEMP/reminder-native" bash scripts/verify-reminder-android.sh
+      - name: Compile native module and run Android adapter tests
+        run: cd android && ./gradlew :local-reminders:testDebugUnitTest :local-reminders:assembleDebug --no-daemon --max-workers=2 -Dorg.gradle.java.installations.paths="$JAVA_HOME_17_X64,$JAVA_HOME"
+      - name: Verify Expo bridge artifact and executed adapter regressions
+        run: |
+          python3 - <<'PY'
+          from io import BytesIO
+          from pathlib import Path
+          from zipfile import ZipFile
+          import xml.etree.ElementTree as ET
+          build = Path("modules/local-reminders/android/build")
+          with ZipFile(build / "outputs/aar/local-reminders-debug.aar") as aar:
+              with ZipFile(BytesIO(aar.read("classes.jar"))) as classes:
+                  assert "com/habbittracker/reminders/LocalRemindersModule.class" in classes.namelist()
+          report = ET.parse(build / "test-results/testDebugUnitTest/TEST-com.habbittracker.reminders.AndroidAdapterTest.xml").getroot()
+          assert int(report.attrib["tests"]) >= 21, report.attrib
+          assert all(int(report.attrib[key]) == 0 for key in ("failures", "errors", "skipped")), report.attrib
+          print("Expo bridge present in full module AAR; Android adapter tests:", report.attrib)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: local-reminder-native-test-results
+          path: |
+            mobile/modules/local-reminders/android/build/reports/tests
+            mobile/modules/local-reminders/android/build/test-results
+            mobile/modules/local-reminders/android/build/outputs/aar
+            ${{ runner.temp }}/reminder-native/build/reports/tests
+            ${{ runner.temp }}/reminder-native/build/test-results

@@ -301,6 +301,12 @@ class SupabaseDatabase:
         function = "archive_habit" if archived else "restore_habit"
         return await self._habit_rpc(function, {"p_owner": user_id, "p_habit": habit_id})
 
+    async def get_local_reminder_plan(self, user_id: str) -> dict:
+        response = await self._rpc("get_local_reminder_plan", {"p_owner": user_id})
+        self._occurrence_error(response)
+        response.raise_for_status()
+        return response.json()
+
     async def get_today(self, user_id: str) -> dict:
         response = await self._rpc("get_today", {"p_owner": user_id})
         self._occurrence_error(response)

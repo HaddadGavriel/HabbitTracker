@@ -391,3 +391,12 @@ export async function requestReminder(session: Session, habitId: string, key: st
     method: 'POST', headers: { 'Idempotency-Key': key }, body: '{}',
   });
 }
+
+
+export type LocalReminderPlan = {
+  version: 1; owner_id: string; server_time: string; local_date: string; timezone: string;
+  effective: { habit_id: string; local_date: string; timezone: string; closes_at: string; reminder_times: string[] }[];
+  future: { habit_id: string; schedule: 'daily' | 'selected'; weekdays: number[]; reminder_times: string[]; eligible_from: string }[];
+};
+export const readLocalReminderPlan = (session: Session) =>
+  request<LocalReminderPlan>('/local-reminder-plan', session, { method: 'GET' });
