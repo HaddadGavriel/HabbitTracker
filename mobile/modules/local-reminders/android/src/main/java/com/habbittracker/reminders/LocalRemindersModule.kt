@@ -23,11 +23,15 @@ class LocalRemindersModule : Module() {
       pendingLaunch = null
       val owner = intent?.getStringExtra("local_reminder_owner")
       val type = intent?.getStringExtra("local_reminder_type")
+      val lease = intent?.getStringExtra("local_reminder_lease")
+      val sequence = intent?.getLongExtra("local_reminder_sequence", 0) ?: 0
+      intent?.removeExtra("local_reminder_lease")
+      intent?.removeExtra("local_reminder_sequence")
       intent?.removeExtra("local_reminder_owner")
       intent?.removeExtra("local_reminder_type")
       if (type == "local_habit_reminder" && owner != null &&
         Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}").matches(owner)) {
-        Engine.acknowledge(context(), owner)
+        Engine.acknowledge(context(), owner, lease, sequence)
         mapOf("type" to type, "owner_id" to UUID.fromString(owner).toString(), "target" to "today")
       } else null
     }

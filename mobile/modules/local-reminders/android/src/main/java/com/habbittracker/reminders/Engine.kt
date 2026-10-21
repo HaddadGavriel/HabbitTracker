@@ -12,6 +12,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.work.*
 import org.json.JSONObject
+import org.json.JSONArray
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -105,13 +106,52 @@ internal object Engine {
       else System.currentTimeMillis() - s.getLong("wall")
     return Instant.parse(s.getString("anchor")).plusMillis(maxOf(0L, delta))
   }
-  private fun port(c: Context, onInexact: () -> Unit = {}) = object : Journal.Port {
-    override fun load(): Journal.State? = read(c)?.let {
-      Journal.State(it.getString("lease"), rules(it), Instant.parse(it.getString("cursor")))
+  private fun readJournal(s: JSONObject): Journal.State {
+    val j = s.optJSONObject("journal")
+    if (j == null) {
+      // Upgrade the earlier PR journal: its one counted batch was already committed.
+      val counted = s.optString("countedBatch")
+      val cursor = maxOf(Instant.parse(s.getString("cursor")),
+        if (counted.isEmpty()) Instant.EPOCH else Instant.parse(counted))
+      val total = s.optLong("unreadCount", 0)
+      return Journal.State(s.getString("lease"), rules(s), cursor, emptyList(), total, 0, total > 0)
     }
+    require(j.getInt("version") == 2)
+    val backlog = j.getJSONArray("backlog")
+    val windows = (0 until backlog.length()).map { i ->
+      val w = backlog.getJSONObject(i); val saved = w.getJSONArray("rules")
+      val restored = (0 until saved.length()).map { n ->
+        val r = saved.getJSONObject(n); val days = r.getJSONArray("weekdays")
+        Planner.Rule(s.getString("owner"), r.getString("habit"), r.getString("zone"), r.getString("start"),
+          if (r.isNull("date")) null else r.getString("date"),
+          if (r.isNull("closes")) null else r.getString("closes"),
+          (0 until days.length()).map { days.getInt(it) }.toSet(), r.getString("time"))
+      }
+      Journal.Window(restored, Instant.parse(w.getString("cursor")), Instant.parse(w.getString("until")))
+    }
+    return Journal.State(s.getString("lease"), rules(s), Instant.parse(j.getString("cursor")), windows,
+      j.getLong("total"), j.getLong("acknowledged"), j.getBoolean("presentationPending"))
+  }
+  private fun storeJournal(s: JSONObject, state: Journal.State): JSONObject {
+    val backlog = JSONArray()
+    for (w in state.backlog) {
+      val saved = JSONArray()
+      for (r in w.rules) saved.put(JSONObject().put("habit", r.habit).put("zone", r.zone.id)
+        .put("start", r.start.toString()).put("date", r.onlyDate?.toString() ?: JSONObject.NULL)
+        .put("closes", r.closes?.toString() ?: JSONObject.NULL).put("weekdays", JSONArray(r.weekdays.sorted()))
+        .put("time", r.time.toString()))
+      backlog.put(JSONObject().put("rules", saved).put("cursor", w.cursor.toString()).put("until", w.until.toString()))
+    }
+    s.remove("cursor"); s.remove("unreadCount"); s.remove("countedBatch")
+    return s.put("journal", JSONObject().put("version", 2).put("cursor", state.cursor.toString())
+      .put("backlog", backlog).put("total", state.total).put("acknowledged", state.acknowledged)
+      .put("presentationPending", state.presentationPending))
+  }
+  private fun port(c: Context, onInexact: () -> Unit = {}) = object : Journal.Port {
+    override fun load(): Journal.State? = read(c)?.let { readJournal(it) }
     override fun save(state: Journal.State) {
       val s = requireNotNull(read(c)); check(s.getString("lease") == state.lease)
-      write(c, s.put("cursor", state.cursor.toString()))
+      write(c, storeJournal(s, state))
     }
     override fun arm(time: Instant) {
       if (exact(c)) {
@@ -122,22 +162,19 @@ internal object Engine {
       alarm(c).setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, (System.currentTimeMillis() + maxOf(0L, time.toEpochMilli() - now(c).toEpochMilli())), intent(c))
     }
     override fun cancel() { alarm(c).cancel(intent(c)) }
-    override fun present(events: List<Planner.Event>) {
+    override fun present(state: Journal.State) {
       check(allowed(c)) { "notifications blocked" }
-      // One aggregate notification avoids Android's active-notification capacity limit.
-      // Full batch is represented by a count, with a validated owner-bound Today target.
-      val owner = events.first().rule.owner
-      val state = requireNotNull(read(c))
-      val batch = events.first().instant.toString()
-      if (state.optString("countedBatch") != batch) {
-        state.put("unreadCount", state.optLong("unreadCount", 0) + events.size)
-        state.put("countedBatch", batch)
-        write(c, state) // preserve the entire batch even if posting fails
-      }
-      val count = state.getLong("unreadCount")
+      // Consumption and the aggregate count were committed together before this OS boundary.
+      val owner = requireNotNull(read(c)).getString("owner")
+      val count = state.total - state.acknowledged
       val launch = requireNotNull(c.packageManager.getLaunchIntentForPackage(c.packageName))
       launch.putExtra("local_reminder_type", "local_habit_reminder")
       launch.putExtra("local_reminder_owner", UUID.fromString(owner).toString())
+      launch.putExtra("local_reminder_lease", state.lease)
+      launch.putExtra("local_reminder_sequence", state.total)
+      // Extras do not participate in PendingIntent identity. A shared UPDATE_CURRENT
+      // token would rewrite an OLD notification's receipt before a failed notify().
+      launch.action = "com.habbittracker.LOCAL_REMINDER_TAP.${state.lease}.${state.total}"
       val tap = PendingIntent.getActivity(c, 231, launch, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
       val notification = NotificationCompat.Builder(c, CHANNEL)
         .setSmallIcon(c.applicationInfo.icon).setContentTitle("Habit Tracker")
@@ -152,7 +189,7 @@ internal object Engine {
     if (!s.isNull("plan") && Instant.parse(p.getString("server_time")) <
       Instant.parse(s.getJSONObject("plan").getString("server_time"))) return repair(c)
     val candidate = JSONObject(s.toString()).put("plan", p)
-    rules(candidate) // validate the complete replacement before any persistence
+    val replacementRules = rules(candidate) // validate before any persistence
     val elapsed = SystemClock.elapsedRealtime()
     require(started >= 0 && started <= elapsed && elapsed - started <= 120_000) { "stale clock sample" }
     // Server time is a lower bound at receipt. Do not fire early or skip an
@@ -161,19 +198,17 @@ internal object Engine {
     candidate.put("anchor", serverNow.toString()).put("elapsed", elapsed)
       .put("wall", System.currentTimeMillis()).put("boot", boot(c))
       .put("clockUncertaintyMs", elapsed - started)
-    val cursor = Instant.parse(s.getString("cursor"))
-    candidate.put("cursor", maxOf(serverNow, cursor).toString())
-    write(c, candidate) // write-ahead: repair can finish even if arming fails
+    val replacement = Journal.replacement(readJournal(s), lease, replacementRules, serverNow,
+      LocalDate.parse(p.getString("local_date")))
+    write(c, storeJournal(candidate, replacement)) // Plan, clock, backlog and outbox commit together.
     return repair(c)
   }
-  @Synchronized fun acknowledge(c: Context, owner: String) {
+  @Synchronized fun acknowledge(c: Context, owner: String, lease: String?, sequence: Long) {
     val state = read(c) ?: return
-    if (state.getString("owner") == owner) {
-      val acknowledged = state.optString("countedBatch")
-      if (acknowledged.isNotEmpty()) {
-        state.put("cursor", maxOf(Instant.parse(state.getString("cursor")), Instant.parse(acknowledged)).toString())
-      }
-      write(c, state.put("unreadCount", 0))
+    if (state.getString("owner") == owner && state.getString("lease") == lease) {
+      // A tap can acknowledge only what that notification actually represented.
+      // Never advance a scheduling cursor or erase an unpresented newer batch.
+      write(c, storeJournal(state, readJournal(state).acknowledge(sequence)))
     }
   }
   @Synchronized fun cancel(c: Context, lease: String): Map<String, Any> {

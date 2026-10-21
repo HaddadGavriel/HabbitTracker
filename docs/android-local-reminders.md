@@ -45,12 +45,31 @@ DST gaps shift by the gap duration (02:30 becomes 03:30 for a one-hour gap).
 Overlaps use the earlier offset once. Entirely skipped civil dates are skipped.
 An effective reminder cannot occur at or after its original deadline.
 
-The native `Journal` holds a cursor and the next derived batch. A complete owner,
-lease, plan, clock anchor and cursor are written through Android `AtomicFile` in
+The native `Journal` holds an active recurrence cursor, compact overdue recurrence
+windows, and a counted presentation outbox. A complete owner, lease, plan, clock
+anchor and journal are written together through Android `AtomicFile` in
 `noBackupFilesDir`, before scheduling. There are no stored credentials or push
 identities. Event identities are deterministic owner/habit/date/configured-time
 strings; an overlap cannot duplicate them. A single stable immutable PendingIntent
 replaces the one earliest OS alarm. Repeating reconciliation cannot grow a queue.
+Replacement freezes undelivered old rules into finite **time windows**, not a finite
+list of notifications. Each window retains its own cursor and inclusive end; newly
+introduced rules start strictly after the replacement cutover. Repeated refreshes
+cannot move a backlog cursor, replay newly introduced past times, or add empty
+windows. Empty windows are pruned as work drains. The Android adapter uses the
+same `Journal.replacement` transition tested by the Java coordinator.
+
+Already accepted occurrence snapshots remain immutable, including after their
+original deadline removes them from the server's still-open projection. For
+predicted dates at or after the new profile date, overdue work must intersect the
+new authoritative rules (same habit, date, configured time, zone, schedule and
+deadline). An absent current occurrence cancels that prediction; archive retains
+the current snapshot and removes future recurrence. Older elapsed dates retain
+the rules accepted when they became due: the minimal plan contains no historical
+revocation feed. Remote edits made while offline cannot be reconstructed from
+this projection; a fresh plan governs its current/future coverage. Account
+cancellation always discards all windows and the outbox.
+
 An old account lease cannot replace/cancel a new account's schedule; cancellation
 persists a tombstone before OS cleanup. A fresh acquire after cancellation creates
 a new lease. Older server plans cannot overwrite a newer plan.
@@ -62,15 +81,22 @@ WorkManager work repairs an interrupted
 write/arm/delivery transition without requiring JavaScript. This is a recovery
 mechanism, not a finite notification horizon. Each pass drains at most 64 batches;
 remaining work stays durable and reports `catchup_pending` for subsequent recovery.
-The receiver holds a short bounded wake lock. A process killed between delivery
-and cursor commit can retry the same notification; absolute exactly-once physical
+The receiver holds a short bounded wake lock. A process killed between OS presentation
+and outbox acknowledgement can retry the same notification; absolute exactly-once physical
 notification delivery is not possible across that OS boundary.
 
 There is only one outstanding alarm and one local notification slot. Simultaneous
 reminders are represented by one counted notification; delayed batches accumulate
 a persistent unread count instead of exceeding Android's active-notification cap.
-The count is journaled before posting and keyed by batch instant so retry cannot
-increment it twice. Tapping and consuming launch metadata acknowledges the count.
+Batch consumption, the monotonic total count and a pending-presentation flag commit
+atomically **before** posting. A failed write consumes nothing; a failed post or
+post-acknowledgement write leaves the counted outbox retryable. Replacement carries
+that outbox unchanged. Retry cannot increment the same batch again, even if the
+new plan changes the batch composition. A tap carries the lease and displayed
+sequence, so an old notification cannot acknowledge newer unpresented work or a
+new enable/account epoch. Acknowledgement never advances recurrence cursors.
+The version-2 journal also upgrades the earlier PR format's counted batch without
+counting it again.
 Scheduling exceptions/capacity failures retain desired state and report
 `repair_required`; nothing is silently truncated to a platform queue length.
 
@@ -134,9 +160,16 @@ Never point these tests at a shared database.
 The `Local reminder native verification` GitHub workflow installs JDK 17/21 and
 Android tools, generates an ignored Android project with a fake Firebase file,
 and runs `:local-reminders:testDebugUnitTest :local-reminders:assembleDebug`.
+It then asserts that the built AAR contains `LocalRemindersModule.class` and that
+all 19 or more adapter tests ran with zero failures, errors or skips. The AAR and
+XML/HTML test reports are uploaded for inspection.
 `AndroidAdapterTest` exercises the production adapter against Robolectric’s Android
-framework: atomic persistence, alarm restoration/cancellation, ownership fencing,
-notification/channel denial and exact-alarm denial.
+framework: real adapter serialization/atomic persistence, alarm restoration and
+cancellation, ownership fencing, notification/channel and exact-alarm denial,
+overdue replacement, repeated refreshes, snapshot expiry, timezone cutovers, 130
+batches across three recovery passes, and persistence/presentation failures.
+Fault tests shadow only AtomicFile and NotificationManager boundaries; they use
+the production planner, coordinator and adapter.
 These tests do not establish device delivery. A local equivalent is:
 
 ```sh
@@ -174,22 +207,25 @@ Based on merged main `ff5d531` (PR #28), verified against origin before changes:
 - The production Java planner/journal runner passed on JDK 17, including DST gaps,
   overlaps and a half-hour transition; phone/profile zone differences; skipped
   civil dates; selected weekdays; snapshot deadlines; 1,000 simultaneous reminders;
-  stable retries; partial scheduling/persistence failures; and durable backlog.
-- Engine-only Android Kotlin/Java compilation and debug AAR assembly passed.
-  All eight Robolectric adapter tests passed: persistent alarm restoration and
-  cancellation, owner fencing, exact-alarm fallback, reboot clock uncertainty,
-  notification denial, interrupted atomic writes, effective snapshots with a
-  different phone zone, and blocked local-channel preservation of configured times.
-- Expo prebuild and module discovery/configuration succeeded. The full Expo module
-  build was attempted with JDK 17/21, Android SDK 36 and the native toolchain, but
-  could not download the repository's locked `react-android:0.86.3` debug AAR:
-  Maven Central redirects it to `repo.reactnative.dev`, which this environment's
-  network policy rejects with HTTP 403. The Expo bridge/full integration build
-  therefore remains unverified; the standalone path excludes that bridge only.
+  overdue replacement without retroactive new times; repeated refreshes; 132 daily
+  batches with refresh/restart between bounded passes; and durable count/outbox
+  recovery across persistence and presentation failures.
+- The updated production Android engine compiled and assembled locally; all 19
+  Robolectric adapter tests passed (zero failures, errors or skips), including
+  replacement, 130 batches across multiple passes, actual persistence and notification
+  boundary failures, old tap receipt isolation, and earlier journal migration.
+- The CI setup fix in `7a43ad82` is preserved (`packages: platform-tools`). Its
+  [native workflow run](https://github.com/HaddadGavriel/HabbitTracker/actions/runs/39515322237)
+  succeeded, including the full Expo module build and Android adapter tests.
+  Verification of the replacement/outbox changes is recorded below after CI.
+- The local environment still cannot download the locked React Native debug AAR
+  redirected to `repo.reactnative.dev` (network policy HTTP 403). Full Expo module
+  verification uses GitHub's runner; the local standalone path compiles the exact
+  production engine and adapter tests, excluding only the Expo bridge.
 
 No physical-device or emulator delivery check ran. No shared migration, deployment,
-remote notification send, or merge was performed. The PR remains draft pending
-full Expo integration build verification and later device verification.
+remote notification send, or merge was performed. The PR remains draft until the replacement regression suite and full Expo module
+build pass on the updated branch. Device delivery remains a separate manual check.
 
 ## Official documentation checked on 2026-10-21
 

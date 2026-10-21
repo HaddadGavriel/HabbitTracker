@@ -51,6 +51,7 @@ public final class Planner {
       Instant instant = resolve(date, rule.time, rule.zone);
       // Skipped civil dates (e.g. Apia 2011) must not deliver on another date.
       if (!instant.atZone(rule.zone).toLocalDate().equals(date)) continue;
+      if (rule.closes != null && !instant.isBefore(rule.closes)) return null;
       if (instant.isAfter(after) && (rule.closes == null || instant.isBefore(rule.closes)))
         return new Event(rule, date, instant);
     }
