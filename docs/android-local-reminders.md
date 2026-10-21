@@ -202,11 +202,15 @@ real remote send, deployment, shared migration or merge is claimed by this PR.
 
 ## Actual results for this PR
 
-Based on merged main `ff5d531` (PR #28), verified against origin before changes:
+Based on merged main `ff5d531` (PR #28). Replacement/durability fixes are verified
+at `739ceb9435968054b4573bf3345784580a451dc4` on the existing PR #29 branch:
 
 - All 1,660 backend tests passed against a fresh disposable PostgreSQL 16 database
   with all migrations and the repository's Supabase-style table/function grants.
 - All 31 mobile test files passed; TypeScript checking passed.
+  [Backend CI](https://github.com/HaddadGavriel/HabbitTracker/actions/runs/39548302551)
+  and [mobile CI](https://github.com/HaddadGavriel/HabbitTracker/actions/runs/39548302573)
+  also passed on the verified engine revision.
 - The production Java planner/journal runner passed on JDK 17, including DST gaps,
   overlaps and a half-hour transition; phone/profile zone differences; skipped
   civil dates; selected weekdays; snapshot deadlines; 1,000 simultaneous reminders;
@@ -218,18 +222,24 @@ Based on merged main `ff5d531` (PR #28), verified against origin before changes:
   replacement, 130 batches across multiple passes, 132 daily batches across a
   profile date rollback, persistence failures (including a silently failed commit),
   notification failures, old tap receipt isolation, and earlier journal migration.
-- The CI setup fix in `7a43ad82` is preserved (`packages: platform-tools`). Its
-  [native workflow run](https://github.com/HaddadGavriel/HabbitTracker/actions/runs/39515322237)
-  succeeded, including the full Expo module build and Android adapter tests.
-  Verification of the replacement/outbox changes is recorded below after CI.
+- The CI setup fix in `7a43ad82` is preserved (`packages: platform-tools`).
+  The [full native workflow on the fixed engine](https://github.com/HaddadGavriel/HabbitTracker/actions/runs/39548302653)
+  passed: the production engine compiled independently, the full Expo module ran
+  `:local-reminders:compileDebugKotlin`, `:local-reminders:testDebugUnitTest` and
+  `:local-reminders:assembleDebug`, and all 21 adapter tests passed again with zero
+  failures, errors or skips. The final artifact check opened the full module AAR
+  and confirmed `com/habbittracker/reminders/LocalRemindersModule.class` is present.
+  The workflow uploads that AAR plus XML/HTML reports for both verification paths.
+  No build/test step was skipped or relaxed to obtain the result.
 - The local environment still cannot download the locked React Native debug AAR
   redirected to `repo.reactnative.dev` (network policy HTTP 403). Full Expo module
   verification uses GitHub's runner; the local standalone path compiles the exact
   production engine and adapter tests, excluding only the Expo bridge.
 
 No physical-device or emulator delivery check ran. No shared migration, deployment,
-remote notification send, or merge was performed. The PR remains draft until the replacement regression suite and full Expo module
-build pass on the updated branch. Device delivery remains a separate manual check.
+remote notification send, or merge was performed. The overdue-replacement and
+full-build review blockers are resolved. Product-screen/session integration remains
+the next PR; physical-device delivery remains a separate manual verification task.
 
 ## Official documentation checked on 2026-10-21
 
