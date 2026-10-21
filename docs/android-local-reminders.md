@@ -161,7 +161,7 @@ The `Local reminder native verification` GitHub workflow installs JDK 17/21 and
 Android tools, generates an ignored Android project with a fake Firebase file,
 and runs `:local-reminders:testDebugUnitTest :local-reminders:assembleDebug`.
 It then asserts that the built AAR contains `LocalRemindersModule.class` and that
-all 19 or more adapter tests ran with zero failures, errors or skips. The AAR and
+all 20 or more adapter tests ran with zero failures, errors or skips. The AAR and
 XML/HTML test reports are uploaded for inspection.
 `AndroidAdapterTest` exercises the production adapter against Robolectric’s Android
 framework: real adapter serialization/atomic persistence, alarm restoration and
@@ -210,7 +210,7 @@ Based on merged main `ff5d531` (PR #28), verified against origin before changes:
   overdue replacement without retroactive new times; repeated refreshes; 132 daily
   batches with refresh/restart between bounded passes; and durable count/outbox
   recovery across persistence and presentation failures.
-- The updated production Android engine compiled and assembled locally; all 19
+- The updated production Android engine compiled and assembled locally; all 20
   Robolectric adapter tests passed (zero failures, errors or skips), including
   replacement, 130 batches across multiple passes, actual persistence and notification
   boundary failures, old tap receipt isolation, and earlier journal migration.

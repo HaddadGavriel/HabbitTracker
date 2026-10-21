@@ -83,9 +83,9 @@ public final class Journal {
     for (Window w : outstanding) {
       List<Planner.Rule> confirmed = new ArrayList<>();
       for (Planner.Rule previous : w.rules) {
-        // Stored occurrence snapshots are immutable, including after archive or
-        // expiry (when they disappear from the server's still-open projection).
-        if (previous.onlyDate != null) { confirmed.add(previous); continue; }
+        // Snapshots and already-frozen historical rules are immutable. A later
+        // timezone rollback must not turn their earned backlog into a prediction.
+        if (previous.onlyDate != null || previous.closes != null) { confirmed.add(previous); continue; }
         // The plan has no historical revocation information. Preserve elapsed dates;
         // today's/open projected work must still be authorized by the refreshed plan.
         Instant historyEnd = authoritativeDate.atStartOfDay(previous.zone).toInstant();

@@ -85,12 +85,14 @@ public class EngineTest {
     eq(p.state.pending.get(0).instant, Instant.parse("2026-10-22T08:01:00Z"));
     // More than two drain passes, with a refresh and fresh coordinator between each pass.
     p.state = new Journal.State("lease", List.of(a), at("00:00"));
-    Instant later = Instant.parse("2027-03-01T12:00:00Z"); // 132 elapsed daily batches
+    Instant later = Instant.parse("2027-03-01T08:05:00Z"); // 132 elapsed daily batches
     Planner.Rule snapshot = new Planner.Rule(OWNER, HABIT, "UTC", "2027-03-01", "2027-03-01",
       "2027-03-02T00:00:00Z", Set.of(), "08:00");
     List<Planner.Rule> current = List.of(snapshot, rule("UTC", "2027-03-02", "08:00", Set.of()));
     replace(j, current, later); eq(j.tick(later), false); eq(p.state.total, 64L);
-    replace(new Journal(p), current, later); eq(new Journal(p).tick(later), false); eq(p.state.total, 128L);
+    // Roll back the profile date during catch-up (e.g. travel to Honolulu).
+    new Journal(p).replace("lease", current, later, LocalDate.parse("2027-02-28"));
+    eq(new Journal(p).tick(later), false); eq(p.state.total, 128L);
     replace(new Journal(p), current, later); eq(new Journal(p).tick(later), true); eq(p.state.total, 132L);
     eq(p.state.backlog.size(), 0);
     replace(j, current, later); j.tick(later); eq(p.state.total, 132L);

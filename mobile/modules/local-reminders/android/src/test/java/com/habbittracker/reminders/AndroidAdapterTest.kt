@@ -203,6 +203,24 @@ class AndroidAdapterTest {
     assertNotNull(notification())
   }
 
+  @Test fun historicalBacklogSurvivesProfileDateRollbackBetweenBoundedPasses() {
+    val lease = Engine.acquire(context, owner)
+    val initial = plan().put("server_time", "2026-10-20T00:00:00Z").put("local_date", "2026-10-20")
+    initial.getJSONArray("future").getJSONObject(0).put("eligible_from", "2026-10-21")
+    replace(lease, initial)
+    val current = todayPlan().put("server_time", "2027-03-01T08:05:00Z").put("local_date", "2027-03-01")
+    current.getJSONArray("effective").getJSONObject(0).put("local_date", "2027-03-01").put("closes_at", "2027-03-02T00:00:00Z")
+    current.getJSONArray("future").getJSONObject(0).put("eligible_from", "2027-03-02")
+    assertEquals("catchup_pending", replace(lease, current)["status"])
+    assertEquals(64L, journal().getLong("total"))
+    current.put("local_date", "2027-02-28").put("timezone", "Pacific/Honolulu")
+    assertEquals("catchup_pending", replace(lease, current)["status"])
+    assertEquals(128L, journal().getLong("total"))
+    Engine.repair(context)
+    assertEquals(132L, journal().getLong("total"))
+    assertEquals(0, journal().getJSONArray("backlog").length())
+  }
+
   @Test fun timezoneChangeRetainsSnapshotAndUsesNewFutureFloorWithoutReplay() {
     val lease = Engine.acquire(context, owner)
     replace(lease, todayPlan())
