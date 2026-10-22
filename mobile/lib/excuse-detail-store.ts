@@ -20,7 +20,7 @@ export function validateExcuse(excuse: ExcuseResult, occurrenceId?: string) {
         || excuse.occurrence.state !== (excuse.status === 'approved' ? 'excused' : 'missed')
         || !excuse.decided_at || (excuse.decision_source === 'automatic'
           ? excuse.status !== 'approved' || excuse.decided_by !== null
-          : excuse.decision_source !== 'friend' || !excuse.decided_by))) {
+          : excuse.decision_source === 'deleted_friend' ? excuse.decided_by !== null : excuse.decision_source !== 'friend' || !excuse.decided_by))) {
     throw new ApiError('Unexpected excuse response', 200, 'invalid_response');
   }
 }

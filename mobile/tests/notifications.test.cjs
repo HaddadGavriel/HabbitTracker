@@ -242,3 +242,12 @@ test('an unreadable journal warns after local signout instead of assuming no rem
   assert.equal(x.service.snapshot().status, 'error');
   assert.equal(count(x, 'register'), 0);
 });
+
+test('confirmed deletion forgets registration journal despite unavailable remote cancellation, and reports local storage failure', async () => {
+  const x=await enabled({unregister:async()=>{throw Error('Auth account removed');}});
+  await x.service.forgetDeletedAccount();
+  assert.equal(x.journal().registrations.length,0); assert.equal(x.journal().enabledUser,null);
+  assert.equal(x.service.canPresent(),false);
+  x.deps.save=async()=>{throw Error('storage');};
+  await assert.rejects(x.service.forgetDeletedAccount(),/clear notification journal/);
+});

@@ -1,3 +1,4 @@
+import { AccountDeletionGate } from '../components/account-deletion-gate';
 import { notificationService } from '../lib/notification-runtime';
 import { NotificationTapGate } from '../components/notification-tap-gate';
 import { Stack } from 'expo-router';
@@ -19,4 +20,4 @@ function Routes() {
     <Stack.Protected guard={link.phase === 'idle' && access.home}><Stack.Screen name="home" /><Stack.Screen name="settings" options={{ headerTitle: 'Settings' }} /><Stack.Screen name="friends" options={{ headerTitle: 'Friends' }} /><Stack.Screen name="manage-sharing" options={{ headerTitle: 'Manage sharing' }} /><Stack.Screen name="shared-habits" options={{ headerTitle: "Friends’ habits" }} /><Stack.Screen name="pending-excuses" options={{ headerTitle: 'Pending decisions' }} /><Stack.Screen name="excuse-detail" options={{ headerTitle: 'Excuse details' }} /><Stack.Screen name="shared-habit" options={{ headerTitle: 'Shared habit' }} /><Stack.Screen name="today" options={{ headerTitle: 'Today' }} /><Stack.Screen name="my-habits" options={{ headerTitle: 'My habits' }} /><Stack.Screen name="create-habit" options={{ headerTitle: 'Create habit' }} /><Stack.Screen name="edit-habit" options={{ headerTitle: 'Edit habit' }} /><Stack.Screen name="habit-history" options={{ headerTitle: 'Habit history' }} /><Stack.Screen name="diagnostics" options={{ title: 'Infrastructure diagnostics' }} /></Stack.Protected>
   </Stack></>;
 }
-export default function RootLayout() { return <SessionProvider><AuthLinkProvider><Routes /></AuthLinkProvider></SessionProvider>; }
+export default function RootLayout() { return <SessionProvider><AccountDeletionGate><AuthLinkProvider><Routes /></AuthLinkProvider></AccountDeletionGate></SessionProvider>; }

@@ -214,3 +214,18 @@ test('habit scope is independent and persistence excludes unexpected server prop
   await x.service.send(secondHabit, 'sender-a'); assert.equal(x.disk.size, 2);
   assert.ok([...x.disk.values()].every(value => !value.includes('never persist me')));
 });
+
+test('confirmed account deletion drains pending journal writes and fences late provider outcomes', async () => {
+  const provider=deferred(), x=setup({requestReminder:()=>provider.promise});
+  await x.load(); const sending=x.send(); await flush();
+  assert.equal(x.disk.size,1);
+  await x.service.clearForAccountDeletion(); x.disk.clear();
+  provider.resolve(result()); await sending;
+  assert.equal(x.disk.size,0); assert.equal(Object.keys(x.service.snapshot()).length,0);
+  const saving=deferred(), y=setup({save:()=>saving.promise});
+  await y.load(); const work=y.send(); await flush();
+  let cleared=false; const cleanup=y.service.clearForAccountDeletion().then(()=>{cleared=true;});
+  await flush(); assert.equal(cleared,false);
+  saving.resolve(); await Promise.all([cleanup,work]);
+  assert.equal(cleared,true); assert.equal(y.calls.filter(c=>c[0]==='post').length,0);
+});

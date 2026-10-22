@@ -224,7 +224,7 @@ export type HistoryExcuse = {
   id: string;
   explanation: string;
   status: 'pending' | 'approved' | 'rejected';
-  decision_source: 'automatic' | 'friend' | null;
+  decision_source: 'automatic' | 'friend' | 'deleted_friend' | null;
   decided_by: string | null;
   decided_at: string | null;
   created_at: string;
@@ -400,3 +400,22 @@ export type LocalReminderPlan = {
 };
 export const readLocalReminderPlan = (session: Session) =>
   request<LocalReminderPlan>('/local-reminder-plan', session, { method: 'GET' });
+
+export const beginAccountDeletion = (session: Session, password: string, receipt: string) =>
+  request<{ state: 'pending' | 'complete' }>('/account/deletion', session, {
+    method: 'POST', body: JSON.stringify({ password, receipt, confirmation: 'DELETE MY ACCOUNT' }),
+  });
+export async function recoverAccountDeletion(receipt: string): Promise<{ state: 'pending' | 'complete' | 'not_found' }> {
+  // No auth session survives confirmed Auth deletion. The persisted random
+  // receipt grants only status/retry of this one deletion; never log its value.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    const response = await fetch(`${apiUrl}/account/deletion/recover`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ receipt }), signal: controller.signal,
+    });
+    if (!response.ok) throw new Error('Deletion status unavailable');
+    return await response.json();
+  } catch { throw new Error('Unable to confirm deletion. Retry status.'); }
+  finally { clearTimeout(timer); }
+}

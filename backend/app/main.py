@@ -1,8 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
-from .routers import devices, excuses, friends, habits, history, infrastructure, occurrences, profiles, reminders, sharing
+from .routers import account, devices, excuses, friends, habits, history, infrastructure, occurrences, profiles, reminders, sharing
 
 app = FastAPI(title="Habit Tracker API", version="0.9.0")
 settings = get_settings()
@@ -13,6 +16,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(account.router)
 app.include_router(devices.router)
 app.include_router(infrastructure.router)
 app.include_router(profiles.router)
@@ -28,3 +32,10 @@ app.include_router(reminders.router)
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "healthy"}
+
+
+@app.exception_handler(RequestValidationError)
+async def redact_account_validation(request: Request, exc: RequestValidationError):
+    if request.url.path.startswith('/account/deletion'):
+        return JSONResponse(status_code=422, content={'detail': {'code': 'invalid_deletion_request', 'message': 'Check confirmation, password and recovery receipt.'}})
+    return await request_validation_exception_handler(request, exc)

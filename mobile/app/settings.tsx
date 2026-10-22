@@ -1,3 +1,4 @@
+import { useAccountDeletion } from '../components/account-deletion-gate';
 import { useRef, useState } from 'react';
 import { Button, Text } from 'react-native';
 import { Link } from 'expo-router';
@@ -8,6 +9,18 @@ import { profileInput } from '../lib/profile-input';
 import { useSession } from '../lib/session';
 export default function Settings() {
   const { profile, session, store } = useSession();
+  const deletion = useAccountDeletion();
+  const [deleting, setDeleting] = useState(false);
+  const [password, setPassword] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  async function deleteAccount() {
+    try {
+      if (!password || confirmation !== 'DELETE MY ACCOUNT') throw new Error('Enter your current password and type DELETE MY ACCOUNT.');
+      const value = password; setPassword('');
+      if (!session) throw new Error('Sign in again');
+      await deletion.begin(value, confirmation, session.user.id);
+    } catch { setMessage('Enter your current password and type DELETE MY ACCOUNT.'); }
+  }
   const [username, setUsername] = useState(profile?.username ?? '');
   const [name, setName] = useState(profile?.display_name ?? '');
   const [timezone, setTimezone] = useState(profile?.timezone ?? '');
@@ -49,6 +62,14 @@ export default function Settings() {
     <Message text={message} /><Button title={busy ? 'Saving…' : 'Save settings'} disabled={busy} onPress={save} />
     <Button title="Reload saved profile" disabled={busy} onPress={reload} />
     <NotificationControls />
+    <Text style={styles.title}>Delete account permanently</Text>
+    <Text>This permanently deletes your account, habits, excuses, friendships and registrations. Final decisions you made for friends remain anonymously as “Deleted friend”. This cannot be undone.</Text>
+    {!deleting ? <Button title="Delete my account…" color="#b00020" disabled={busy} onPress={() => setDeleting(true)} /> : <>
+      <Field label="Current password" value={password} onChangeText={setPassword} secureTextEntry autoCapitalize="none" autoCorrect={false} />
+      <Field label="Type DELETE MY ACCOUNT to confirm" value={confirmation} onChangeText={setConfirmation} autoCapitalize="none" autoCorrect={false} />
+      <Button title="Permanently delete my account" color="#b00020" disabled={busy || !password || confirmation !== 'DELETE MY ACCOUNT'} onPress={deleteAccount} />
+      <Button title="Cancel deletion" onPress={() => { setPassword(''); setConfirmation(''); setDeleting(false); }} />
+    </>}
     <Link href="/home" style={styles.message}>Back to home</Link><Button title="Sign out" onPress={store.signOut} />
   </Form>;
 }

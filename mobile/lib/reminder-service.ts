@@ -34,6 +34,20 @@ export class ReminderService {
   private epoch = 0;
   private state: Record<string, ReminderView> = {};
   private listeners = new Set<() => void>();
+  private deletionEpoch = 0;
+  private writes = new Set<Promise<void>>();
+  private async saveJournal(sender: string, habit: string, requests: ReminderRequest[]) {
+    const work = this.deps.save(sender, habit, requests);
+    this.writes.add(work);
+    try { await work; } finally { this.writes.delete(work); }
+  }
+  clearForAccountDeletion = async () => {
+    this.setSession(null);
+    this.deletionEpoch = ++this.epoch;
+    this.journals.clear(); this.loads.clear(); this.state = {};
+    this.listeners.forEach(listener => listener());
+    await Promise.allSettled([...this.writes]);
+  };
   private journals = new Map<string, ReminderRequest[]>();
   private loads = new Map<string, Promise<ReminderRequest[]>>();
   private locks = new Set<string>();
@@ -63,6 +77,7 @@ export class ReminderService {
     try { return await work; } finally { this.loads.delete(slot); }
   }
   private async readJournal(sender: string, habit: string, slot: string): Promise<ReminderRequest[]> {
+    const epoch = this.epoch;
     const value = await this.deps.load(sender, habit);
     if (value !== null && (!Array.isArray(value) || value.some(row => !row || typeof row !== 'object'
       || typeof row.key !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(row.key)
@@ -73,7 +88,7 @@ export class ReminderService {
       || (!['unconfirmed', 'rejected', 'cooldown'].includes(row.status) && !row.result))
       || new Set(value.map(row => row.key)).size !== value.length)) throw new Error('Invalid reminder journal');
     const rows = (value ?? []) as ReminderRequest[];
-    this.journals.set(slot, rows);
+    if (epoch >= this.deletionEpoch) this.journals.set(slot, rows);
     return rows;
   }
   load = async (habit: string, sender: string, refreshedAccess = false) => {
@@ -132,7 +147,8 @@ export class ReminderService {
       }
       // Also write on a check: if a previous write failed ambiguously, the exact
       // same in-memory key must become durable before it can leave this process.
-      try { await this.deps.save(sender, habit, requests); }
+      if (epoch < this.deletionEpoch) return;
+      try { await this.saveJournal(sender, habit, requests); }
       catch { message = 'The request key could not be saved. Nothing was dispatched by this attempt. Retry saving and checking this same request.'; return; }
       if (!current() || !request) return;
       let updated: ReminderRequest;
@@ -159,9 +175,10 @@ export class ReminderService {
           message = 'The outcome could not be confirmed. Check the same saved request; do not replace its key.';
         }
       }
+      if (epoch < this.deletionEpoch) return;
       requests = requests.map(row => row.key === request!.key ? updated : row);
       this.journals.set(slot, requests);
-      try { await this.deps.save(sender, habit, requests); }
+      try { await this.saveJournal(sender, habit, requests); }
       catch { message = 'The result could not be saved. The original request key is retained; check that same request after restarting.'; }
     } catch (error) {
       blocked = true;

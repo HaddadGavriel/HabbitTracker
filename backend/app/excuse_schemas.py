@@ -36,7 +36,7 @@ class ExcuseResult(BaseModel):
     owner_id: UUID
     explanation: str
     status: Literal["pending", "approved", "rejected"]
-    decision_source: Literal["automatic", "friend"] | None
+    decision_source: Literal["automatic", "friend", "deleted_friend"] | None
     decided_by: UUID | None
     decided_at: datetime | None
     created_at: datetime
