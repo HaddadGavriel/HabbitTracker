@@ -1,6 +1,7 @@
 import type { Session } from '@supabase/supabase-js';
 import { ApiError, type HabitResult, type HabitStatus } from './api';
 import type { SessionStore } from './session-store';
+import { reconcileReminders, type ReminderMutations } from './reminder-mutations';
 
 type SessionSource = Pick<SessionStore, 'snapshot' | 'subscribe'>;
 export type HabitFilter = Exclude<HabitStatus, 'all'>;
@@ -46,6 +47,7 @@ export class HabitsStore {
     private sessions: SessionSource,
     private listHabits: (session: Session, status: HabitFilter) => Promise<HabitResult[]>,
     private restoreHabit: (session: Session, id: string) => Promise<HabitResult>,
+    private reminders?: ReminderMutations,
   ) {}
   snapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -142,10 +144,11 @@ export class HabitsStore {
     let restored = false;
     try {
       const result = await this.restoreHabit(session, habit.id);
-      if (!isCurrent()) return;
       if (result.id !== habit.id || result.owner_id !== session.user.id || result.archived_at !== null) {
         throw new ApiError('Unexpected restore response', 200, 'invalid_response');
       }
+      reconcileReminders(this.reminders, session);
+      if (!isCurrent()) return;
       restored = true;
       // The confirmed result remains reflected even if the following list refresh fails.
       this.publish({ ...this.state, habits: this.state.habits.filter(item => item.id !== habit.id) });

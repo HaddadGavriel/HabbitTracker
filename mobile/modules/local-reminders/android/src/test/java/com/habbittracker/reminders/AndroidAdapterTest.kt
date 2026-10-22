@@ -342,6 +342,126 @@ class AndroidAdapterTest {
     assertEquals("awaiting_plan", Engine.repair(context)["status"])
   }
 
+  private fun reconcile(lease: String, value: JSONObject) =
+    Engine.reconcile(context, lease, value.toString(), SystemClock.elapsedRealtime())
+  private fun advanceAnchor(time: String) {
+    val value = saved().put("anchor", time).put("elapsed", SystemClock.elapsedRealtime())
+    context.noBackupFilesDir.resolve("local-reminders-v1.json").writeText(value.toString())
+  }
+  private fun alarmDelay() = requireNotNull(shadowOf(context.getSystemService(AlarmManager::class.java))
+    .peekNextScheduledAlarm()).triggerAtTime - System.currentTimeMillis()
+
+  @Test fun productReconcileSkipsMissedTimesAndDoesNotReplayAfterRestart() {
+    val lease = Engine.acquire(context, owner)
+    reconcile(lease, todayPlan(times = listOf("08:00", "09:00")))
+    reconcile(lease, todayPlan("08:05", listOf("08:00", "09:00")))
+    repeat(3) { Engine.repair(context); assertEquals(lease, Engine.acquire(context, owner)) }
+    assertEquals(0L, journal().getLong("total"))
+    assertEquals(0, journal().getJSONArray("backlog").length())
+    assertNull(notification())
+    assertTrue(kotlin.math.abs(alarmDelay() - 55 * 60 * 1000L) < 1000)
+  }
+
+  @Test fun productCompletionAndExcuseSuppressionKeepFutureDatesAndUndoUsesOnlyFutureTimes() {
+    val lease = Engine.acquire(context, owner)
+    reconcile(lease, todayPlan(times = listOf("08:00", "09:00")))
+    Engine.suppress(context, lease, owner, "2026-10-21")
+    assertTrue(kotlin.math.abs(alarmDelay() - 32 * 60 * 60 * 1000L) < 1000)
+    assertEquals(0L, journal().getLong("total"))
+    // Reopening receives a fresh server plan with the same immutable snapshot.
+    reconcile(lease, todayPlan("08:05", listOf("08:00", "09:00")))
+    assertTrue(kotlin.math.abs(alarmDelay() - 55 * 60 * 1000L) < 1000)
+    assertNull(notification())
+  }
+
+  @Test fun localDateSuppressionWorksForOfflineRecurringPredictionAfterMidnight() {
+    val lease = Engine.acquire(context, owner)
+    reconcile(lease, plan())
+    advanceAnchor("2026-10-22T07:00:00Z")
+    Engine.suppress(context, lease, owner, "2026-10-22")
+    Engine.repair(context)
+    assertTrue(kotlin.math.abs(alarmDelay() - 25 * 60 * 60 * 1000L) < 1000)
+    assertNull(notification())
+    assertEquals(1, saved().getJSONArray("suppressed").length())
+  }
+
+  @Test fun productArchiveCancelsTodayFutureAndPresentedThenRestoreDoesNotCatchUp() {
+    val lease = Engine.acquire(context, owner)
+    reconcile(lease, todayPlan(times = listOf("08:00", "09:00")))
+    advanceAnchor("2026-10-21T08:00:00Z")
+    Engine.repair(context, true)
+    assertNotNull(notification())
+    Engine.suppress(context, lease, owner, null)
+    assertNull(notification())
+    assertEquals(0, shadowOf(context.getSystemService(AlarmManager::class.java)).scheduledAlarms.size)
+    reconcile(lease, todayPlan("08:05", listOf("08:00", "09:00")))
+    assertNull(notification())
+    assertEquals(1L, journal().getLong("total"))
+    assertEquals(1L, journal().getLong("acknowledged"))
+    assertTrue(kotlin.math.abs(alarmDelay() - 55 * 60 * 1000L) < 1000)
+  }
+
+  @Test fun productDelayedAlarmPostsOneBatchAndRestartDoesNotRepeatAmbiguousPresentation() {
+    val lease = Engine.acquire(context, owner)
+    reconcile(lease, todayPlan(times = listOf("08:00", "09:00")))
+    advanceAnchor("2026-10-21T09:05:00Z")
+    FailingAtomicFile.writesBeforeFailure = 1 // counted consumption commits; post acknowledgement fails
+    assertEquals("repair_required", Engine.repair(context, true)["status"])
+    assertNotNull(notification())
+    assertEquals(1L, journal().getLong("total"))
+    assertTrue(journal().getBoolean("presentationPending"))
+    Engine.repair(context) // recovery discards the ambiguous outbox instead of reposting
+    assertFalse(journal().getBoolean("presentationPending"))
+    assertEquals(1L, journal().getLong("total"))
+    assertTrue(kotlin.math.abs(alarmDelay() - (22 * 60 + 55) * 60 * 1000L) < 1000)
+  }
+
+  @Test fun productPermissionRevocationClearsPresentedAndGrantSkipsElapsedReminders() {
+    val lease = Engine.acquire(context, owner)
+    reconcile(lease, todayPlan(times = listOf("08:00", "09:00")))
+    advanceAnchor("2026-10-21T08:00:00Z")
+    Engine.repair(context, true)
+    assertNotNull(notification())
+    shadowOf(context.getSystemService(NotificationManager::class.java)).setNotificationsEnabled(false)
+    assertEquals("permission_blocked", Engine.repair(context)["status"])
+    assertNull(notification())
+    assertEquals(0, shadowOf(context.getSystemService(AlarmManager::class.java)).scheduledAlarms.size)
+    advanceAnchor("2026-10-21T09:05:00Z")
+    shadowOf(context.getSystemService(NotificationManager::class.java)).setNotificationsEnabled(true)
+    Engine.repair(context)
+    assertNull(notification())
+    assertEquals(1L, journal().getLong("total"))
+  }
+
+  @Test fun nativeReceiptRequiresCurrentOwnerLeaseAndCountedPositiveSequence() {
+    val lease = Engine.acquire(context, owner)
+    reconcile(lease, todayPlan())
+    assertFalse(Engine.acknowledge(context, owner, lease, 0))
+    assertFalse(Engine.acknowledge(context, owner, lease, 1))
+    advanceAnchor("2026-10-21T08:00:00Z")
+    Engine.repair(context, true)
+    assertFalse(Engine.acknowledge(context, owner, "wrong-lease", 1))
+    assertFalse(Engine.acknowledge(context, "bbbbbbbb-2222-4222-8222-222222222222", lease, 1))
+    assertFalse(Engine.acknowledge(context, owner, lease, 2))
+    assertTrue(Engine.acknowledge(context, owner, lease, 1))
+    Engine.cancelAll(context)
+    assertFalse(Engine.acknowledge(context, owner, lease, 1))
+  }
+
+  @Test fun productSuppressionSurvivesDiskReloadAndOldAccountCannotSuppressNewOne() {
+    val lease = Engine.acquire(context, owner)
+    reconcile(lease, todayPlan())
+    Engine.suppress(context, lease, owner, "2026-10-21")
+    Engine.repair(context)
+    assertTrue(kotlin.math.abs(alarmDelay() - 32 * 60 * 60 * 1000L) < 1000)
+    val next = Engine.acquire(context, "bbbbbbbb-2222-4222-8222-222222222222")
+    assertEquals("stale_lease", Engine.suppress(context, lease, owner, null)["status"])
+    assertEquals(next, saved().getString("lease"))
+    Engine.cancelAll(context) // process bootstrap has no in-memory lease
+    assertEquals("cancelled", Engine.repair(context)["status"])
+    assertNull(notification())
+  }
+
 }
 
 

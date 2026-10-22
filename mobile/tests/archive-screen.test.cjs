@@ -60,6 +60,7 @@ function mount(overrides = {}) {
       archiveHabit: (...args) => { calls.archive++; return (overrides.archive ?? (async session => habit({ owner_id: session.user.id, archived_at: '2026-10-11T13:00:00Z' })))(...args); },
     },
     '../lib/edit-habit-store': { EditHabitStore },
+    '../lib/local-reminder-runtime': { localReminderService: { changed: async () => {} } },
     '../lib/session': { useSession: () => ({ store: sessions, profile: { timezone: 'UTC' } }) },
   };
   const exports = {};

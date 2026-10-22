@@ -3,7 +3,7 @@ import type { HabitResult, HistoryResult, TodayResult } from './api';
 import type { SessionState } from './session-store';
 import { isTimestamp, uuidPattern } from './reminder-rules';
 
-type Target = { kind: 'today' } | { kind: 'infrastructure' } | { kind: 'habit'; habit: string; occurrence: string; reminder: string };
+type Target = { kind: 'today'; owner?: string } | { kind: 'infrastructure' } | { kind: 'habit'; habit: string; occurrence: string; reminder: string };
 export type Tap = { key: string; target: Target };
 export type TapDestination = '/today' | '/home' | '/diagnostics' | { pathname: '/habit-history'; params: { id: string } };
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -73,9 +73,21 @@ export class NotificationTaps {
   stop = () => { this.pending = null; this.ready = false; this.epoch++; };
   receive = (response: unknown, defaultAction: string): Promise<void> => {
     const tap = parseNotificationTap(response, defaultAction);
+    return this.claim(tap);
+  };
+  receiveLocal = (value: unknown): Promise<void> => {
+    if (!object(value) || value.type !== 'local_habit_reminder' || value.target !== 'today'
+      || typeof value.owner_id !== 'string' || !uuidPattern.test(value.owner_id)
+      || typeof value.receipt_id !== 'string' || !/^[A-Za-z0-9:-]{1,100}$/.test(value.receipt_id)) return Promise.resolve();
+    const owner = value.owner_id.toLowerCase();
+    if (this.session.session && this.session.session.user.id.toLowerCase() !== owner) return Promise.resolve();
+    return this.claim({ key: `local:${owner}:${value.receipt_id}`, target: { kind: 'today', owner } });
+  };
+  private claim(tap: Tap | null): Promise<void> {
     if (!tap || this.seen.has(tap.key)) return Promise.resolve();
     this.seen.add(tap.key);
-    const pending: Pending = { tap, user: this.session.session?.user.id ?? null, claimed: false };
+    const pending: Pending = { tap, user: tap.target.kind === 'today' && tap.target.owner
+      ? tap.target.owner : this.session.session?.user.id ?? null, claimed: false };
     this.pending = pending;
     this.epoch++;
     // Claim before navigating, with serialized writes. A stale native last
@@ -101,7 +113,7 @@ export class NotificationTaps {
     });
     this.storage = work;
     return work;
-  };
+  }
   private pump() {
     const pending = this.pending, session = this.session.session;
     if (this.running || !pending?.claimed || !this.ready || !this.foreground || this.session.status !== 'ready'

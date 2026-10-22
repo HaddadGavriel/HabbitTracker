@@ -2,6 +2,7 @@ import type { Session } from '@supabase/supabase-js';
 import { ApiError, type ExcuseResult, type OccurrenceResult, type TodayResult } from './api';
 import { explanationInput } from './excuse-input';
 import type { SessionStore } from './session-store';
+import { reconcileReminders, type ReminderMutations } from './reminder-mutations';
 
 type CompletionState = { pending: boolean; error: string | null; refreshRequired: boolean };
 type Operation = CompletionState & { context: number; clearErrorOnRefresh?: boolean };
@@ -80,6 +81,7 @@ export class TodayStore {
     private writeProgress: (session: Session, id: string, progress: number) => Promise<OccurrenceResult>,
     private now: () => number = () => performance.now(),
     private excuseAPI?: ExcuseAPI,
+    private reminders?: ReminderMutations,
   ) {
     this.excuseGroup = TodayStore.excuseGuards.get(sessions) ?? { locks: new Map(), activeStores: new Set() };
     this.excuseLocks = this.excuseGroup.locks;
@@ -176,6 +178,7 @@ export class TodayStore {
     try {
       const result = await this.excuseAPI.submitExcuse(session, item.id, explanation);
       this.validateExcuse(result, item);
+      reconcileReminders(this.reminders, session, { habitId: item.habit_id, localDate: item.local_date });
       this.excuseLocks.set(key, { pending: false, needsRead: true, exists: true });
       if (!isCurrent()) return;
       this.readRevision++;
@@ -339,6 +342,7 @@ export class TodayStore {
         .filter(item => this.state.progressDrafts[item.id] !== undefined)
         .map(item => [item.id, this.state.progressDrafts[item.id]]));
       this.publish({ today, loading: false, refreshing: false, error: null, completions: this.completionStates(today), progressDrafts, excuses });
+      reconcileReminders(this.reminders, session);
     } catch (error) {
       if (!isCurrent()) return;
       this.publish({ ...this.state, loading: false, refreshing: false, error: errorMessage(error) });
@@ -394,7 +398,6 @@ export class TodayStore {
     try {
       const result = await (change.kind === 'completion' ? this.writeCompletion(session, item.id, change.value)
         : this.writeProgress(session, item.id, change.value));
-      if (!isCurrent()) { ignoreStale(); return; }
       const completed = change.kind === 'completion' ? change.value : item.snapshot.type === 'target' && change.value >= item.snapshot.target;
       if (result?.id !== item.id || result.owner_id !== session.user.id || result.habit_id !== item.habit_id
         || result.local_date !== item.local_date || result.timezone !== item.timezone || result.closes_at !== item.closes_at
@@ -403,6 +406,8 @@ export class TodayStore {
         || result.state !== (completed ? 'completed' : 'in_progress') || !Number.isFinite(Date.parse(result.updated_at))) {
         throw new ApiError('Unexpected occurrence response', 200, 'invalid_response');
       }
+      reconcileReminders(this.reminders, session, result.completed ? { habitId: item.habit_id, localDate: item.local_date } : undefined);
+      if (!isCurrent()) { ignoreStale(); return; }
       // Invalidate reads dispatched before acknowledgement, including reads started
       // during the write. The following refresh gets a new revision.
       this.readRevision++;

@@ -5,19 +5,21 @@ export type LocalReminderStatus = {
   idleQuotaApplies?: boolean;
   clockUncertaintyMs?: number;
 };
-type Native = {
+export type LocalReminderNative = {
   addListener(event: 'onLaunch', listener: () => void): { remove(): void };
   clock(): Promise<number>;
   launchMetadata(): Promise<unknown>;
   acquire(owner: string): Promise<string>;
   replace(lease: string, plan: string, started: number): Promise<LocalReminderStatus>;
+  reconcile(lease: string, plan: string, started: number): Promise<LocalReminderStatus>;
+  suppress(lease: string, habit: string, localDate: string | null): Promise<LocalReminderStatus>;
+  cancelAll(): Promise<LocalReminderStatus>;
   cancel(lease: string): Promise<LocalReminderStatus>;
   status(): Promise<LocalReminderStatus>;
 };
-/** Foundation API only. Next PR wires session, preferences and product mutations.
- * A lease fences late work after account replacement/cancellation. No remote sends.
- */
-export const localReminders = requireOptionalNativeModule<Native>('LocalReminders');
+/** Android recurrence service. Product calls use future-only reconciliation;
+ * a lease fences late work after account replacement/cancellation. No remote sends. */
+export const localReminders = requireOptionalNativeModule<LocalReminderNative>('LocalReminders');
 
 
 /** Only a constant destination is accepted; account claims never authorize content. */

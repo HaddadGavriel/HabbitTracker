@@ -5,7 +5,7 @@ notification to the owner of a shared habit. This is an explicit request, not a
 scheduler: `reminder_times` configuration does not send notifications. Mobile registration controls are in Settings; see [account-aware notification
 registration and cleanup](mobile-notifications.md). The [mobile reminder workflow](mobile-reminders-walkthrough.md)
 adds explicit sending, durable same-key recovery, and guarded notification taps.
-Local scheduling, background resend, and receipt polling remain deferred.
+Owner [Android local scheduling](android-local-reminders.md) is integrated separately. Background resend and receipt polling for remote friend reminders remain deferred.
 
 ## HTTP contract
 

@@ -1,4 +1,4 @@
-# Account-aware remote notifications
+# Account-aware notifications
 
 Settings → **Notifications** owns the enable/disable controls and status.
 Diagnostics embeds the same controls and uses the same application service; it
@@ -6,9 +6,11 @@ only listens for infrastructure-test receipts. Merely opening either screen does
 not prompt for permission. An explicit **Enable notifications** action records
 opt-in for the current account on this installation. Logout/account switching and
 permission denial clear that opt-in. A normal restart of the same signed-in
-account retains it. The remote service does not schedule local reminders. The
-[durable Android local-reminder foundation](android-local-reminders.md) is a separate
-engine; product-action integration follows in the next PR.
+account retains it. The [Android local-reminder service](android-local-reminders.md)
+has a separate **Enable habit reminders** installation preference and integrates
+authenticated loads, foreground refresh, and relevant successful mutations. It schedules independently of remote
+friend-reminder delivery. Habit saves and tracking remain available when notification
+permission is denied or scheduling fails; Settings provides status and retry/resync.
 
 ## Setup and release order
 
@@ -19,7 +21,8 @@ the native app after installing dependencies. App configuration sets the FCM
 default channel to `friend-reminders`.
 
 For a separately authorized release, apply unapplied migrations in filename order
-through **`202610200001_device_registration_cleanup.sql`**, deploy the matching
+through the latest committed migration, including device registration cleanup and
+local-reminder eligibility, deploy the matching
 backend, then distribute the new native build. Do not edit/reapply old migrations.
 The old three-argument registration RPC remains compatible. Old clients omit the
 intent ID and receive a server-generated one, but do not gain lifecycle cleanup;
@@ -37,7 +40,7 @@ or investigate the orphaned registration. Do not copy tokens into bug reports.
 
 ## Channels, permissions, and transitions
 
-The service creates `friend-reminders` and `infrastructure-tests` before requesting
+The remote service creates `friend-reminders` and `infrastructure-tests` before requesting
 Android permission or obtaining a token. Backend reminder sends explicitly use
 `friend-reminders`; infrastructure sends use `infrastructure-tests`. Users control
 channel settings; creating a channel does not override their blocked importance.
@@ -45,7 +48,11 @@ App permission denial or a blocked friend-reminder channel stops registration,
 turns off opt-in, and attempts cleanup. Foreground checks never prompt. Settings
 explains denial and opens Android's app notification settings, falling back to
 app settings when that intent is unsupported. After allowing notifications, tap
-Enable again. iOS authorized, provisional, and ephemeral states are supported.
+Enable again. iOS authorized, provisional, and ephemeral states are supported for remote notifications.
+Android local reminders use a separate **Habit reminders** (`local-habit-reminders`)
+channel. Its blocked state and exact-alarm limitations appear in local scheduling
+status. Foreground/resync observes OS changes; allowing a channel never replays
+missed reminder times. Local scheduling is unavailable in Expo Go, web and iOS.
 
 The application has one `NotificationService`, wired directly into `SessionStore`
 and native listeners. It reconciles restored/auth-refreshed sessions, foreground
@@ -145,7 +152,18 @@ references fall back safely. The tap handler waits for authentication/onboarding
 and Router readiness, binds pending work to an account, and persistently deduplicates
 handled taps. It never follows payload URLs. Infrastructure taps remain separate
 and never trigger a send. Generic push content and registration cleanup behavior
-are unchanged.
+are unchanged. Local reminder taps enter the same authenticated, validated navigation
+flow after checking native owner metadata and the current account; they fetch current
+Today and never follow a payload URL.
+
+## Offline local reminders
+
+This device can continue its persisted schedule without JavaScript or connectivity.
+A completion, excuse, edit or archive on another device cannot instantly cancel
+notifications on this offline device. Foreground activity and retry/resync fetch
+current server eligibility when connectivity permits. Reconciliation skips elapsed
+times; it cannot retract a notification the user already saw. See the [local engine
+guide](android-local-reminders.md) and [Android device checklist](android-local-reminders-verification.md).
 
 ## Verification
 

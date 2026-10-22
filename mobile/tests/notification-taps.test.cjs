@@ -162,3 +162,45 @@ test('route readiness loss during a read waits and revalidates before navigating
   x.taps.setReady(false); read.resolve(today()); await flush(); assert.equal(x.navigation.length, 0);
   x.taps.setReady(true); await flush(); assert.equal(reads, 2); assert.deepEqual(x.navigation, ['/today']);
 });
+
+const localMetadata = (changes = {}) => ({ type: 'local_habit_reminder', owner_id: habit,
+  target: 'today', receipt_id: `${reminder}:1`, ...changes });
+
+test('local native cold tap uses the shared authenticated Today gate and durable receipt dedup', async () => {
+  const x = setup();
+  await x.taps.receiveLocal(localMetadata());
+  x.taps.setSession(state('loading', habit)); x.taps.setReady(true);
+  await flush(); assert.equal(x.calls.length, 0);
+  x.taps.setSession(state('ready', habit)); await flush();
+  assert.deepEqual(x.calls, [['today', habit]]); assert.deepEqual(x.navigation, ['/today']);
+  await x.taps.receiveLocal(localMetadata()); await flush(); assert.equal(x.navigation.length, 1);
+  const restarted = setup({}, x.disk); restarted.taps.setSession(state('ready', habit)); restarted.taps.setReady(true);
+  await restarted.taps.receiveLocal(localMetadata()); await flush(); assert.equal(restarted.calls.length, 0);
+});
+
+test('local tap ignores malformed metadata, arbitrary destinations, missing receipts and another owner', async () => {
+  const x = setup(); x.taps.setSession(state('ready', habit)); x.taps.setReady(true);
+  for (const metadata of [null, {}, localMetadata({ owner_id: occurrence }), localMetadata({ target: '/diagnostics' }),
+    localMetadata({ receipt_id: null }), localMetadata({ receipt_id: 'a/b' }), localMetadata({ type: 'habit_reminder' })]) {
+    await x.taps.receiveLocal(metadata);
+  }
+  await flush(); assert.equal(x.calls.length, 0); assert.equal(x.navigation.length, 0);
+});
+
+test('local receipt is bound to its original account through startup and late Today reads', async () => {
+  const cold = setup(); await cold.taps.receiveLocal(localMetadata());
+  cold.taps.setSession(state('ready', occurrence)); cold.taps.setReady(true); await flush();
+  assert.equal(cold.calls.length, 0);
+  const read = deferred(), x = setup({ readToday: () => read.promise });
+  x.taps.setSession(state('ready', habit)); x.taps.setReady(true);
+  await x.taps.receiveLocal(localMetadata()); await flush();
+  x.taps.setSession(state('ready', occurrence)); read.resolve(today(habit)); await flush();
+  assert.equal(x.navigation.length, 0);
+});
+
+test('offline local tap falls back safely without trusting the receipt as authorization', async () => {
+  const x = setup({ readToday: async () => { throw Error('offline'); } });
+  x.taps.setSession(state('ready', habit)); x.taps.setReady(true);
+  await x.taps.receiveLocal(localMetadata()); await flush();
+  assert.deepEqual(x.navigation, ['/home']); assert.match(x.taps.snapshot(), /no longer available/);
+});

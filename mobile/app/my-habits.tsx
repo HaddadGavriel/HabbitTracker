@@ -6,10 +6,11 @@ import { listHabits, restoreHabit } from '../lib/api';
 import { habitSchedule, habitType } from '../lib/habit-labels';
 import { HabitsStore } from '../lib/habits-store';
 import { useSession } from '../lib/session';
+import { localReminderService } from '../lib/local-reminder-runtime';
 
 export default function MyHabits() {
   const { store: sessions } = useSession();
-  const [store] = useState(() => new HabitsStore(sessions, listHabits, restoreHabit));
+  const [store] = useState(() => new HabitsStore(sessions, listHabits, restoreHabit, localReminderService));
   const { habits, status, hasLoaded, loading, refreshing, error,
     restoreConfirmation, restoringId, restoreError, restoreUncertain } = useSyncExternalStore(store.subscribe, store.snapshot);
   // Returning from creation/editing (or checking an uncertain save) reads the current list.

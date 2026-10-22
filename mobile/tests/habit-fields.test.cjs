@@ -126,6 +126,7 @@ test('editor load-error retry requests a reload without attempting a save', () =
     '../components/habit-fields': { HabitFields: 'HabitFields' },
     '../lib/api': {},
     '../lib/edit-habit-store': {},
+    '../lib/local-reminder-runtime': { localReminderService: { changed: async () => {} } },
     '../lib/session': { useSession: () => ({ store: {}, profile: { timezone: 'UTC' } }) },
   };
   const screen = {};

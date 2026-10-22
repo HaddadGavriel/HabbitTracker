@@ -15,7 +15,7 @@ owner-only. A currently authorized friend can [request a push reminder](reminder
 for an open incomplete occurrence due Today. Mobile owners can manage individual
 grants from active or archived habits, and recipients can open read-only
 **Friends’ habits** from Home; see the [mobile sharing walkthrough](mobile-sharing-walkthrough.md).
-Mobile excuse actions and reminder buttons, and scheduled notifications, remain deferred.
+Mobile excuse actions and friend-reminder buttons are available. Owner [local reminders](android-local-reminders.md) use a separate Android scheduling service.
 
 ## Endpoints and errors
 

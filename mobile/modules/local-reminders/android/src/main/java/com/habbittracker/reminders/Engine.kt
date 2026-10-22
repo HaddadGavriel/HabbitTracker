@@ -49,7 +49,7 @@ internal object Engine {
     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
   private fun channels(c: Context) {
     c.getSystemService(NotificationManager::class.java).createNotificationChannel(
-      NotificationChannel(CHANNEL, "My habit reminders", NotificationManager.IMPORTANCE_DEFAULT).apply {
+      NotificationChannel(CHANNEL, "Habit reminders", NotificationManager.IMPORTANCE_DEFAULT).apply {
         lockscreenVisibility = Notification.VISIBILITY_PRIVATE
       })
   }
@@ -101,7 +101,31 @@ internal object Engine {
       for (j in 0 until times.length()) result.add(Planner.Rule(owner, r.getString("habit_id"),
         p.getString("timezone"), r.getString("eligible_from"), null, null, weekdays, times.getString(j)))
     }
-    return result
+    // Local confirmations must also suppress a projected date after midnight,
+    // before a fresh authoritative plan can be fetched. Split recurring rules
+    // around that date rather than deleting all of the habit's future dates.
+    var filtered: List<Planner.Rule> = result
+    val suppressed = s.optJSONArray("suppressed") ?: JSONArray()
+    for (i in 0 until suppressed.length()) {
+      val entry = suppressed.getJSONObject(i)
+      val habit = entry.getString("habit")
+      val date = if (entry.isNull("date")) null else LocalDate.parse(entry.getString("date"))
+      filtered = filtered.flatMap { r ->
+        if (r.habit != habit) listOf(r)
+        else if (date == null || r.onlyDate == date) emptyList()
+        else if (r.onlyDate != null || date.isBefore(r.start)) listOf(r)
+        else {
+          val end = date.atStartOfDay(r.zone).toInstant()
+          val closes = if (r.closes == null || end.isBefore(r.closes)) end else r.closes
+          listOf(
+            Planner.Rule(r.owner, r.habit, r.zone.id, r.start.toString(), null,
+              closes.toString(), r.weekdays, r.time.toString()),
+            Planner.Rule(r.owner, r.habit, r.zone.id, date.plusDays(1).toString(), null,
+              r.closes?.toString(), r.weekdays, r.time.toString()))
+        }
+      }
+    }
+    return filtered
   }
   private fun boot(c: Context) = Settings.Global.getInt(c.contentResolver, Settings.Global.BOOT_COUNT, -1)
   private fun now(c: Context): Instant {
@@ -188,12 +212,17 @@ internal object Engine {
       c.getSystemService(NotificationManager::class.java).notify("local-reminders", 1, notification)
     }
   }
-  @Synchronized fun replace(c: Context, lease: String, plan: String, started: Long): Map<String, Any> {
+  @Synchronized fun replace(c: Context, lease: String, plan: String, started: Long): Map<String, Any> =
+    replacePlan(c, lease, plan, started, false)
+  @Synchronized fun reconcile(c: Context, lease: String, plan: String, started: Long): Map<String, Any> =
+    replacePlan(c, lease, plan, started, true)
+  private fun replacePlan(c: Context, lease: String, plan: String, started: Long, futureOnly: Boolean): Map<String, Any> {
     val s = requireNotNull(read(c)); check(s.getString("lease") == lease) { "stale lease" }
     val p = JSONObject(plan)
     if (!s.isNull("plan") && Instant.parse(p.getString("server_time")) <
       Instant.parse(s.getJSONObject("plan").getString("server_time"))) return repair(c)
     val candidate = JSONObject(s.toString()).put("plan", p)
+    if (futureOnly) candidate.put("futureOnly", true).remove("suppressed")
     val replacementRules = rules(candidate) // validate before any persistence
     val elapsed = SystemClock.elapsedRealtime()
     require(started >= 0 && started <= elapsed && elapsed - started <= 120_000) { "stale clock sample" }
@@ -203,38 +232,72 @@ internal object Engine {
     candidate.put("anchor", serverNow.toString()).put("elapsed", elapsed)
       .put("wall", System.currentTimeMillis()).put("boot", boot(c))
       .put("clockUncertaintyMs", elapsed - started)
-    val replacement = Journal.replacement(readJournal(s), lease, replacementRules, serverNow,
-      LocalDate.parse(p.getString("local_date")))
+    val replacement = if (futureOnly) Journal.reconcile(readJournal(s), lease, replacementRules, serverNow)
+      else Journal.replacement(readJournal(s), lease, replacementRules, serverNow,
+        LocalDate.parse(p.getString("local_date")))
     write(c, storeJournal(candidate, replacement)) // Plan, clock, backlog and outbox commit together.
+    if (futureOnly) c.getSystemService(NotificationManager::class.java).cancel("local-reminders", 1)
     return repair(c)
   }
-  @Synchronized fun acknowledge(c: Context, owner: String, lease: String?, sequence: Long) {
-    val state = read(c) ?: return
-    if (state.getString("owner") == owner && state.getString("lease") == lease) {
-      // A tap can acknowledge only what that notification actually represented.
-      // Never advance a scheduling cursor or erase an unpresented newer batch.
-      write(c, storeJournal(state, readJournal(state).acknowledge(sequence)))
-    }
+  /** A server-confirmed mutation is applied before the next network refresh. */
+  @Synchronized fun suppress(c: Context, lease: String, habit: String, date: String?): Map<String, Any> {
+    val s = read(c) ?: return mapOf("status" to "cancelled")
+    if (s.getString("lease") != lease) return mapOf("status" to "stale_lease")
+    val id = UUID.fromString(habit).toString()
+    val localDate = date?.let { LocalDate.parse(it).toString() }
+    val suppressed = s.optJSONArray("suppressed") ?: JSONArray()
+    suppressed.put(JSONObject().put("habit", id).put("date", localDate ?: JSONObject.NULL))
+    val candidate = JSONObject(s.toString()).put("suppressed", suppressed).put("futureOnly", true)
+    write(c, storeJournal(candidate, Journal.reconcile(readJournal(s), lease, rules(candidate), now(c))))
+    // One generic shared summary cannot selectively represent its former members.
+    c.getSystemService(NotificationManager::class.java).cancel("local-reminders", 1)
+    return repair(c)
+  }
+  @Synchronized fun acknowledge(c: Context, owner: String, lease: String?, sequence: Long): Boolean {
+    val state = read(c) ?: return false
+    if (state.getString("owner") != owner || state.getString("lease") != lease) return false
+    val journal = readJournal(state)
+    if (sequence <= 0 || sequence > journal.total) return false
+    // Only a receipt from this owner/lease and an already-counted presentation
+    // may enter the authenticated JS navigation handler. Stale intents are inert.
+    write(c, storeJournal(state, journal.acknowledge(sequence)))
+    return true
   }
   @Synchronized fun cancel(c: Context, lease: String): Map<String, Any> {
     val s = read(c)
     if (s != null && s.getString("lease") != lease) return mapOf("status" to "stale_lease")
-    write(c, null)
-    alarm(c).cancel(intent(c))
-    WorkManager.getInstance(c).cancelUniqueWork(WORK).result.get(10, TimeUnit.SECONDS)
-    c.getSystemService(NotificationManager::class.java).cancel("local-reminders", 1)
+    return cancelAll(c)
+  }
+  /** Caller serializes this installation-wide cleanup with account acquisition. */
+  @Synchronized fun cancelAll(c: Context): Map<String, Any> {
+    // Cleanup boundaries are independent: a worker failure must not leave the
+    // presented notification visible. Any failure remains actionable to JS.
+    var failure: Exception? = null
+    fun attempt(action: () -> Unit) {
+      try { action() } catch (error: Exception) { if (failure == null) failure = error }
+    }
+    attempt { write(c, null) }
+    attempt { alarm(c).cancel(intent(c)) }
+    attempt { c.getSystemService(NotificationManager::class.java).cancel("local-reminders", 1) }
+    attempt { WorkManager.getInstance(c).cancelUniqueWork(WORK).result.get(10, TimeUnit.SECONDS) }
+    failure?.let { throw it }
     return mapOf("status" to "cancelled")
   }
-  @Synchronized fun repair(c: Context): Map<String, Any> {
+  @Synchronized fun repair(c: Context, deliverAlarm: Boolean = false): Map<String, Any> {
     return try {
       channels(c)
       if (read(c) == null) { alarm(c).cancel(intent(c)); return mapOf("status" to "cancelled") }
       worker(c)
       if (!allowed(c)) {
-        alarm(c).cancel(intent(c)); return mapOf("status" to "permission_blocked")
+        alarm(c).cancel(intent(c))
+        c.getSystemService(NotificationManager::class.java).cancel("local-reminders", 1)
+        return mapOf("status" to "permission_blocked")
       }
       var usedInexact = false
-      val caughtUp = Journal(port(c) { usedInexact = true }).tick(now(c))
+      val coordinator = Journal(port(c) { usedInexact = true })
+      val caughtUp = if (requireNotNull(read(c)).optBoolean("futureOnly", false)) {
+        coordinator.tickFutureOnly(now(c), deliverAlarm); true
+      } else coordinator.tick(now(c))
       val state = requireNotNull(read(c))
       if (!caughtUp) return mapOf("status" to "catchup_pending")
       if (state.isNull("plan")) return mapOf("status" to "awaiting_plan")
@@ -253,7 +316,7 @@ class ReminderReceiver : BroadcastReceiver() {
       .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "HabitTracker:Reminder")
     wake.acquire(9_000L)
     Thread {
-      try { Engine.repair(context.applicationContext) }
+      try { Engine.repair(context.applicationContext, intent.action == "com.habbittracker.REMINDER") }
       finally { if (wake.isHeld) wake.release(); result.finish() }
     }.start()
   }

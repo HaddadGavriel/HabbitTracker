@@ -90,12 +90,15 @@ test('Android notification-settings intent uses the application package with a f
 
 test('Settings and Diagnostics share controls; controls expose safe status and invoke service actions', async () => {
   const calls = []; const state = { status: 'denied', message: 'Notifications are blocked.', busy: false, cleanupPending: true };
+  const localState = { status: 'off', enabled: false };
   const service = { snapshot: () => state, subscribe() {}, enable: () => calls.push('enable'), disable: () => calls.push('disable'), retryCleanup: () => calls.push('cleanup') };
   const jsx = (type, props) => typeof type === 'function' ? type(props) : { type, props };
   const controls = compile('components/notification-controls.tsx', name => ({
     react: { useState: x => [x, () => {}], useSyncExternalStore: (_, snapshot) => snapshot() },
     'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Button: 'Button', Text: 'Text', View: 'View' },
     '../lib/notification-runtime': { notificationService: service, openNotificationSettings: async () => calls.push('settings') },
+    '../lib/local-reminder-runtime': { localReminderService: { snapshot: () => localState, subscribe() {}, disable: async () => calls.push('local-disable') } },
+    './local-reminder-controls': { LocalReminderControls: () => null },
   })[name]);
   const nodes = tree => Array.isArray(tree) ? tree.flatMap(nodes) : !tree || typeof tree !== 'object' ? [] : [tree, ...nodes(tree.props.children)];
   const tree = controls.NotificationControls();
@@ -103,7 +106,11 @@ test('Settings and Diagnostics share controls; controls expose safe status and i
     await nodes(tree).find(n => n.props.title === title).props.onPress();
   }
   await nodes(controls.NotificationCleanupNotice()).find(n => n.props.title === 'Retry notification cleanup').props.onPress();
-  assert.deepEqual(calls, ['enable', 'disable', 'settings', 'cleanup']);
+  assert.deepEqual(calls, ['enable', 'local-disable', 'disable', 'settings', 'cleanup']);
+  localState.status = 'error'; state.cleanupPending = false;
+  const cleanup = nodes(controls.NotificationCleanupNotice()).find(n => n.props.title === 'Retry local reminder cleanup');
+  assert.ok(cleanup); await cleanup.props.onPress();
+  assert.equal(calls.at(-1), 'local-disable');
   for (const screen of ['settings', 'diagnostics']) {
     const source = readFileSync(`${__dirname}/../app/${screen}.tsx`, 'utf8');
     assert(source.includes('<NotificationControls />'));
