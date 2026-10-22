@@ -2,6 +2,7 @@ import type { Session } from '@supabase/supabase-js';
 import { ApiError, type HabitCreate, type HabitResult } from './api';
 import { emptyHabitDraft, habitInput, type HabitDraft } from './habit-input';
 import type { SessionStore } from './session-store';
+import { reconcileReminders, type ReminderMutations } from './reminder-mutations';
 
 type CreationState = { draft: HabitDraft; busy: boolean; created: boolean; error: string | null; ambiguous: boolean };
 const initialState = (): CreationState => ({ draft: emptyHabitDraft(), busy: false, created: false, error: null, ambiguous: false });
@@ -29,6 +30,7 @@ export class CreateHabitStore {
     private sessions: Pick<SessionStore, 'snapshot' | 'subscribe'>,
     private createHabit: (session: Session, input: HabitCreate) => Promise<HabitResult>,
     private onCreated: () => void,
+    private reminders?: ReminderMutations,
   ) {}
   snapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -76,8 +78,9 @@ export class CreateHabitStore {
     this.publish({ ...this.state, busy: true, error: null, ambiguous: false });
     try {
       const result = await this.createHabit(session, input);
-      if (!isCurrent()) return;
       if (result.owner_id !== session.user.id) throw new ApiError('Habit owner mismatch', 201, 'invalid_response');
+      reconcileReminders(this.reminders, session);
+      if (!isCurrent()) return;
     } catch (error) {
       if (isCurrent()) this.publish({ ...this.state, busy: false, ...creationError(error) });
       return;

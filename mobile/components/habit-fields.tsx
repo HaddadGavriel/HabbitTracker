@@ -47,7 +47,7 @@ export function HabitFields({ draft, onChange, disabled, timezone, readOnlyType 
     </View>}
     <Field label="Reminder times (HH:MM, separated by commas)" value={draft.reminderTimes} onChangeText={reminderTimes => onChange({ reminderTimes })}
       editable={!disabled} autoCapitalize="none" autoCorrect={false} placeholder="08:00, 21:30" />
-    <Text style={styles.message}>Enter at least one distinct time in 24-hour format. Times use your profile timezone ({timezone}). These are saved settings; notification scheduling is not implemented yet.</Text>
+    <Text style={styles.message}>Enter at least one distinct time in 24-hour format. Times use your profile timezone ({timezone}). Enable habit reminders in Settings for delivery on this Android device. Today's existing occurrence keeps its saved times; edits apply to future eligible dates.</Text>
   </>;
 }
 

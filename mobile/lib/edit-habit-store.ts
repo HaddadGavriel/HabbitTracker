@@ -3,6 +3,7 @@ import { ApiError, type HabitResult, type HabitUpdate } from './api';
 import { habitChanges, habitDraft } from './habit-edit-input';
 import type { HabitDraft } from './habit-input';
 import type { SessionStore } from './session-store';
+import { reconcileReminders, type ReminderMutations } from './reminder-mutations';
 
 type Unavailable = 'missing' | 'archived' | null;
 type ArchiveState = { phase: 'confirming' | 'pending' | 'failed'; ambiguous: boolean; error: string | null };
@@ -35,6 +36,7 @@ export class EditHabitStore {
     private api: API,
     private id: string,
     private onSaved: () => void,
+    private reminders?: ReminderMutations,
   ) {}
   snapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -121,9 +123,10 @@ export class EditHabitStore {
     this.publish({ ...this.state, saving: true, error: null, ambiguous: false, archive: null });
     try {
       const saved = await this.api.updateHabit(session, this.id, changes);
-      if (!this.isCurrent(revision, session)) return;
       this.checkIdentity(saved, session);
       if (saved.type !== habit.type) throw new ApiError('Unexpected habit type', 200, 'invalid_response');
+      reconcileReminders(this.reminders, session, saved.archived_at !== null ? { habitId: this.id } : undefined);
+      if (!this.isCurrent(revision, session)) return;
       if (saved.archived_at !== null) { this.block('archived'); return; }
     } catch (error) {
       if (!this.isCurrent(revision, session)) return;
@@ -161,11 +164,12 @@ export class EditHabitStore {
     this.publish({ ...this.state, archive: { phase: 'pending', ambiguous: uncertain, error: null }, error: this.state.ambiguous ? this.state.error : null });
     try {
       const archived = await this.api.archiveHabit(session, this.id);
-      if (!this.isCurrent(revision, session)) return;
       this.checkIdentity(archived, session);
       if (typeof archived.archived_at !== 'string' || !archived.archived_at || archived.type !== habit.type) {
         throw new ApiError('Unexpected archive response', 200, 'invalid_response');
       }
+      reconcileReminders(this.reminders, session, { habitId: this.id });
+      if (!this.isCurrent(revision, session)) return;
     } catch (error) {
       if (!this.isCurrent(revision, session)) return;
       const reason = unavailable(error);

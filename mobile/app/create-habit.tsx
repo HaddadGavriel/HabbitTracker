@@ -6,10 +6,11 @@ import { HabitFields } from '../components/habit-fields';
 import { createHabit } from '../lib/api';
 import { CreateHabitStore } from '../lib/create-habit-store';
 import { useSession } from '../lib/session';
+import { localReminderService } from '../lib/local-reminder-runtime';
 
 export default function CreateHabit() {
   const { store: sessions, profile } = useSession();
-  const [store] = useState(() => new CreateHabitStore(sessions, createHabit, () => router.dismissTo('/my-habits')));
+  const [store] = useState(() => new CreateHabitStore(sessions, createHabit, () => router.dismissTo('/my-habits'), localReminderService));
   const { draft, busy, created, error, ambiguous } = useSyncExternalStore(store.subscribe, store.snapshot);
   useEffect(() => { store.start(); return () => store.stop(); }, [store]);
   const disabled = busy || created;

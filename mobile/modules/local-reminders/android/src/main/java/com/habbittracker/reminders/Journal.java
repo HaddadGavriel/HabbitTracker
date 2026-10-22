@@ -104,6 +104,28 @@ public final class Journal {
     // Newly introduced rules only become active AFTER the cutover, never retroactively.
     return new State(lease, rules, cutover, retained, old.total, old.acknowledged, old.presentationPending);
   }
+  /** Product reconciliation drops elapsed predictions and old outbox work. The server
+   * supplies immutable same-day snapshots; absence now means ineligible. */
+  public static State reconcile(State old, String lease, List<Planner.Rule> rules, Instant now) {
+    if (old == null || !old.lease.equals(lease)) throw new IllegalStateException("stale lease");
+    return new State(lease, rules, old.cursor.isAfter(now) ? old.cursor : now,
+      List.of(), old.total, old.total, false);
+  }
+
+  /** Recovery never replays missed reminders. A delayed real alarm can present one
+   * batch, then skips other elapsed times in a single durable cursor transition. */
+  public void tickFutureOnly(Instant now, boolean deliver) {
+    State state = port.load();
+    if (state == null) { port.cancel(); return; }
+    boolean due = deliver && !state.pending.isEmpty() && !state.pending.get(0).instant.isAfter(now);
+    long total = due ? Math.addExact(state.total, state.pending.size()) : state.total;
+    State next = new State(state.lease, state.rules, state.cursor.isAfter(now) ? state.cursor : now,
+      List.of(), total, state.acknowledged, due);
+    port.save(next);
+    if (due) flush(next);
+    restore();
+  }
+
   public void replace(String lease, List<Planner.Rule> rules, Instant serverNow, LocalDate authoritativeDate) {
     port.save(replacement(port.load(), lease, rules, serverNow, authoritativeDate));
     restore();

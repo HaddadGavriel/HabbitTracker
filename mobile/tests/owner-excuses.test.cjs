@@ -112,6 +112,7 @@ async function screen(readToday, readProfile = async s => profile(s.user.id), in
     '../lib/excuse-input': lib('excuse-input'),
     '../lib/api': { readToday, setOccurrenceCompletion, setOccurrenceProgress, ...excuseAPI },
     '../lib/today-store': { TodayStore },
+    '../lib/local-reminder-runtime': { localReminderService: { changed: async () => {} } },
     '../lib/session': { useSession: () => ({ store: sessions }) },
   };
   const exports = compile('app/today.tsx', name => { assert.ok(modules[name], `Unexpected module ${name}`); return modules[name]; });

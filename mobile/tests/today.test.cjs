@@ -112,6 +112,7 @@ async function screen(readToday, readProfile = async s => profile(s.user.id), in
     '../lib/excuse-input': lib('excuse-input'),
     '../lib/api': { readToday, setOccurrenceCompletion, setOccurrenceProgress },
     '../lib/today-store': { TodayStore },
+    '../lib/local-reminder-runtime': { localReminderService: { changed: async () => {} } },
     '../lib/session': { useSession: () => ({ store: sessions }) },
   };
   const exports = compile('app/today.tsx', name => { assert.ok(modules[name], `Unexpected module ${name}`); return modules[name]; });
@@ -1349,6 +1350,7 @@ test('Home links to Today and its route is protected for ready accounts only', (
     '../components/form': { Form: 'Form', styles: {} },
     '../lib/session-store': { routeAccess },
     '../lib/auth-link-context': { AuthLinkProvider: props => props.children, useAuthLink: () => ({ phase: 'idle' }) },
+    '../lib/local-reminder-runtime': { localReminderService: { changed: async () => {} } },
     '../lib/session': { SessionProvider: props => props.children,
       useSession: () => ({ status, session: session(), profile: profile('a'), store: { signOut() {} } }) },
   };

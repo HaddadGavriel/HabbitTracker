@@ -53,7 +53,7 @@ async function setup(createHabit, onCreated = () => {}, options = {}) {
     createProfile: async s => profile(s.user.id),
   });
   await sessions.start();
-  const store = new CreateHabitStore(sessions, createHabit, onCreated);
+  const store = new CreateHabitStore(sessions, createHabit, onCreated, options.reminders);
   store.start();
   return { store, sessions, auth, event: s => callback('SIGNED_IN', s) };
 }
@@ -348,4 +348,64 @@ test('signed-out sessions cannot edit or submit a protected create form', async 
   await x.store.submit();
   assertEmpty(x.store);
   assert.equal(calls, 0);
+});
+
+
+test('confirmed creation stays successful if scheduling throws, rejects, or remains pending', async () => {
+  for (const failure of ['throw', 'reject', 'pending']) {
+    let saves = 0, schedules = 0, navigations = 0;
+    const x = await setup(async () => { saves++; return habit(); }, () => navigations++, {
+      reminders: { changed: captured => {
+        schedules++;
+        assert.equal(captured.user.id, 'a');
+        if (failure === 'throw') throw new Error('native unavailable');
+        if (failure === 'reject') return Promise.reject(new Error('permission or disk failure'));
+        return new Promise(() => {});
+      } },
+    });
+    x.store.update(draft());
+    await x.store.submit();
+    await flush();
+    assert.equal(x.store.snapshot().created, true);
+    assert.equal(x.store.snapshot().error, null);
+    assert.equal(x.store.snapshot().ambiguous, false);
+    assert.equal(navigations, 1);
+    await x.store.submit();
+    assert.equal(saves, 1);
+    assert.equal(schedules, 1);
+    x.store.stop();
+    x.sessions.stop();
+  }
+});
+
+test('creation acknowledged after leaving the screen still reconciles with its captured session', async () => {
+  const write = deferred();
+  const scheduled = [];
+  const x = await setup(() => write.promise, () => assert.fail('No late navigation'), {
+    reminders: { changed: async captured => { scheduled.push(captured.user.id); } },
+  });
+  x.store.update(draft());
+  const pending = x.store.submit();
+  x.store.stop();
+  write.resolve(habit());
+  await pending;
+  assert.deepEqual(scheduled, ['a']);
+  assertEmpty(x.store);
+  x.sessions.stop();
+});
+
+test('an unconfirmed or foreign-owner creation cannot change local schedules', async () => {
+  for (const result of ['failure', 'foreign']) {
+    let schedules = 0;
+    const x = await setup(async () => {
+      if (result === 'failure') throw new Error('network interrupted');
+      return habit({ owner_id: 'b' });
+    }, () => assert.fail('No successful creation'), { reminders: { changed: async () => { schedules++; } } });
+    x.store.update(draft());
+    await x.store.submit();
+    assert.equal(schedules, 0);
+    assert.equal(x.store.snapshot().created, false);
+    x.store.stop();
+    x.sessions.stop();
+  }
 });

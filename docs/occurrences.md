@@ -8,7 +8,7 @@ Normal completion/progress endpoints remain owner-only. [Occurrence excuses](exc
 add owner submissions and decisions by currently authorized shared friends.
 [Occurrence history and current streaks](history.md) add owner-only historical
 reads and streaks, with current streaks also available in authorized shared views.
-Notification delivery and mobile UI remain deferred.
+The Android app supports these tracking actions and [local habit reminders](android-local-reminders.md).
 
 ## HTTP contracts
 

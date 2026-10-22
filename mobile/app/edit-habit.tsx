@@ -6,6 +6,7 @@ import { HabitFields } from '../components/habit-fields';
 import { archiveHabit, readHabit, updateHabit } from '../lib/api';
 import { EditHabitStore } from '../lib/edit-habit-store';
 import { useSession } from '../lib/session';
+import { localReminderService } from '../lib/local-reminder-runtime';
 
 export default function EditHabit() {
   const { id } = useLocalSearchParams<{ id?: string | string[] }>();
@@ -18,7 +19,7 @@ export default function EditHabit() {
 
 function Editor({ id }: { id: string }) {
   const { store: sessions, profile } = useSession();
-  const [store] = useState(() => new EditHabitStore(sessions, { readHabit, updateHabit, archiveHabit }, id, () => router.dismissTo('/my-habits')));
+  const [store] = useState(() => new EditHabitStore(sessions, { readHabit, updateHabit, archiveHabit }, id, () => router.dismissTo('/my-habits'), localReminderService));
   const { draft, loading, saving, saved, error, ambiguous, unavailable, archive } = useSyncExternalStore(store.subscribe, store.snapshot);
   useFocusEffect(useCallback(() => { store.start(); return () => store.stop(); }, [store]));
   const busy = loading || saving || saved;

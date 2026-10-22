@@ -47,7 +47,7 @@ jobs:
               with ZipFile(BytesIO(aar.read("classes.jar"))) as classes:
                   assert "com/habbittracker/reminders/LocalRemindersModule.class" in classes.namelist()
           report = ET.parse(build / "test-results/testDebugUnitTest/TEST-com.habbittracker.reminders.AndroidAdapterTest.xml").getroot()
-          assert int(report.attrib["tests"]) >= 21, report.attrib
+          assert int(report.attrib["tests"]) >= 29, report.attrib
           assert all(int(report.attrib[key]) == 0 for key in ("failures", "errors", "skipped")), report.attrib
           print("Expo bridge present in full module AAR; Android adapter tests:", report.attrib)
           PY

@@ -7,7 +7,7 @@ adds read-only views for explicitly chosen accepted friends. [Occurrence excuses
 add owner explanations and decisions by currently authorized shared friends.
 [Owner occurrence history and current streaks](history.md) include archived habits;
 shared friends receive streak fields but cannot read full history. Notification
-delivery and mobile tracking UI remain deferred. Existing
+delivery and mobile tracking are available in the Android app; see [local reminders](android-local-reminders.md). Existing
 infrastructure, profiles, and friendships remain available.
 
 All endpoints require a valid Supabase Auth bearer access token **and an existing
@@ -59,7 +59,7 @@ timezones of their own. Changing the profile timezone changes subsequent occurre
 according to the transition policy; existing occurrences keep their snapshots.
 Occurrence deadlines account for daylight-saving transitions. The
 [Android local-reminder engine](android-local-reminders.md) projects these rules
-without changing the requirement for configured times; product wiring follows separately.
+without changing the requirement for configured times. Product lifecycle and mutations reconcile through the application service.
 
 Daily schedules with nonempty weekdays and selected schedules with empty weekdays
 are contradictory and rejected. Duplicate weekdays/reminders are rejected rather

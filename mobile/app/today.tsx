@@ -6,6 +6,7 @@ import { ExcuseView } from '../components/excuse-view';
 import { readExcuse, submitExcuse, readToday, setOccurrenceCompletion, setOccurrenceProgress, type OccurrenceResult } from '../lib/api';
 import { trimExplanation } from '../lib/excuse-input';
 import { useSession } from '../lib/session';
+import { localReminderService } from '../lib/local-reminder-runtime';
 import { TodayStore } from '../lib/today-store';
 
 const statusLabels: Record<OccurrenceResult['state'], string> = {
@@ -18,7 +19,7 @@ const statusLabels: Record<OccurrenceResult['state'], string> = {
 
 export default function Today() {
   const { store: sessions } = useSession();
-  const [store] = useState(() => new TodayStore(sessions, readToday, setOccurrenceCompletion, setOccurrenceProgress, undefined, { readExcuse, submitExcuse }));
+  const [store] = useState(() => new TodayStore(sessions, readToday, setOccurrenceCompletion, setOccurrenceProgress, undefined, { readExcuse, submitExcuse }, localReminderService));
   const { today, loading, refreshing, error, completions, progressDrafts, excuses } = useSyncExternalStore(store.subscribe, store.snapshot);
   useFocusEffect(useCallback(() => {
     store.start();

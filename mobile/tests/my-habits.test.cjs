@@ -57,6 +57,7 @@ async function screen(listHabits, restoreHabit = async () => habit()) {
     '../lib/api': { listHabits, restoreHabit },
     '../lib/habit-labels': lib('habit-labels'),
     '../lib/habits-store': { HabitsStore },
+    '../lib/local-reminder-runtime': { localReminderService: { changed: async () => {} } },
     '../lib/session': { useSession: () => ({ store: sessions }) },
   };
   const exports = {};

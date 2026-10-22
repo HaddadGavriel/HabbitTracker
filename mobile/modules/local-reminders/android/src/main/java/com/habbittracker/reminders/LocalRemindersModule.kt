@@ -31,12 +31,17 @@ class LocalRemindersModule : Module() {
       intent?.removeExtra("local_reminder_type")
       if (type == "local_habit_reminder" && owner != null &&
         Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}").matches(owner)) {
-        Engine.acknowledge(context(), owner, lease, sequence)
-        mapOf("type" to type, "owner_id" to UUID.fromString(owner).toString(), "target" to "today")
+        val normalizedOwner = UUID.fromString(owner).toString()
+        if (Engine.acknowledge(context(), normalizedOwner, lease, sequence))
+          mapOf("type" to type, "owner_id" to normalizedOwner, "target" to "today", "receipt_id" to "$lease:$sequence")
+        else null
       } else null
     }
     AsyncFunction("acquire") { owner: String -> Engine.acquire(context(), owner) }
     AsyncFunction("replace") { lease: String, plan: String, started: Double -> Engine.replace(context(), lease, plan, started.toLong()) }
+    AsyncFunction("reconcile") { lease: String, plan: String, started: Double -> Engine.reconcile(context(), lease, plan, started.toLong()) }
+    AsyncFunction("suppress") { lease: String, habit: String, date: String? -> Engine.suppress(context(), lease, habit, date) }
+    AsyncFunction("cancelAll") { Engine.cancelAll(context()) }
     AsyncFunction("cancel") { lease: String -> Engine.cancel(context(), lease) }
     AsyncFunction("status") { Engine.repair(context()) }
   }
