@@ -1,6 +1,7 @@
+import { Button, Link } from '../components/ui';
 import { useCallback, useState, useSyncExternalStore } from 'react';
-import { Link, useFocusEffect } from 'expo-router';
-import { ActivityIndicator, Button, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import { ActivityIndicator, AppState, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { styles } from '../components/form';
 import { listHabits, restoreHabit } from '../lib/api';
 import { habitSchedule, habitType } from '../lib/habit-labels';
@@ -14,7 +15,15 @@ export default function MyHabits() {
   const { habits, status, hasLoaded, loading, refreshing, error,
     restoreConfirmation, restoringId, restoreError, restoreUncertain } = useSyncExternalStore(store.subscribe, store.snapshot);
   // Returning from creation/editing (or checking an uncertain save) reads the current list.
-  useFocusEffect(useCallback(() => { store.start(); return () => store.stop(); }, [store]));
+  useFocusEffect(useCallback(() => {
+    store.start();
+    let previous = AppState.currentState;
+    const subscription = AppState.addEventListener('change', next => {
+      if (next === 'active' && previous !== 'active') void store.refreshServerState();
+      previous = next;
+    });
+    return () => { subscription.remove(); store.stop(); };
+  }, [store]));
   const restoreDisabled = !!restoringId || loading || refreshing || restoreUncertain;
 
   return <FlatList
@@ -84,8 +93,8 @@ export default function MyHabits() {
 const localStyles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#f7f9fc' },
   header: { gap: 16 },
-  filters: { flexDirection: 'row', gap: 12 },
-  filter: { padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#b8c4d8' },
+  filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  filter: { minHeight: 48, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#b8c4d8' },
   selectedFilter: { backgroundColor: '#dbeafe', borderColor: '#2563eb' },
   card: { padding: 16, gap: 8, borderRadius: 8, backgroundColor: 'white' },
   details: { gap: 8 },

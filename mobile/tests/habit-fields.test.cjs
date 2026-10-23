@@ -8,7 +8,8 @@ const ts = require('typescript');
 // Render the actual field/choice handlers using host-element mocks; no native runtime.
 const jsx = (type, props) => typeof type === 'function' ? type(props) : { type, props };
 const modules = {
-  'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
+  ...require('./native-ui-support.cjs'),
+    'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
   'react-native': { Pressable: 'Pressable', Text: 'Text', View: 'View', StyleSheet: { create: value => value } },
   './form': { Field: 'Field', styles: {} },
 };
@@ -116,6 +117,7 @@ test('editor load-error retry requests a reload without attempting a save', () =
   const store = { subscribe() {}, snapshot: () => state,
     reload: () => { reads++; }, save: () => { saves++; } };
   const screenModules = {
+    ...require('./native-ui-support.cjs'),
     'react/jsx-runtime': modules['react/jsx-runtime'],
     react: { useCallback: fn => fn, useState: () => [store],
       useSyncExternalStore: (_subscribe, snapshot) => snapshot() },

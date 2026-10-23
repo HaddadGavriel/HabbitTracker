@@ -1,6 +1,7 @@
+import { Button, Link } from '../components/ui';
 import { useCallback, useState, useSyncExternalStore } from 'react';
-import { Link, useFocusEffect } from 'expo-router';
-import { ActivityIndicator, Button, KeyboardAvoidingView, Platform, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import { ActivityIndicator, AppState, KeyboardAvoidingView, Platform, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Field, styles } from '../components/form';
 import { acceptFriendRequest, listFriendRequests, listFriends, rejectFriendRequest, removeFriend, searchProfile, sendFriendRequest, type PublicProfile, type RelationshipResult } from '../lib/api';
 import { FriendsStore } from '../lib/friends-store';
@@ -16,7 +17,15 @@ export default function Friends() {
     listFriends, listFriendRequests, searchProfile, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend,
   }));
   const state = useSyncExternalStore(store.subscribe, store.snapshot);
-  useFocusEffect(useCallback(() => { store.start(); return () => store.stop(); }, [store]));
+  useFocusEffect(useCallback(() => {
+    store.start();
+    let previous = AppState.currentState;
+    const subscription = AppState.addEventListener('change', next => {
+      if (next === 'active' && previous !== 'active') void store.refresh();
+      previous = next;
+    });
+    return () => { subscription.remove(); store.stop(); };
+  }, [store]));
   const { friends, incoming, outgoing, hasLoaded, loading, refreshing, error, query, searchLoading,
     searchComplete, searchResult, searchError, pendingAction, actionError, notice, refreshRequired, removeConfirmation } = state;
   const disabled = !store.canMutate();
@@ -37,12 +46,12 @@ export default function Friends() {
     </View>)}
   </View>;
 
-  return <KeyboardAvoidingView style={localStyles.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+  return <KeyboardAvoidingView style={localStyles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.form}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={store.refresh} />}>
       <Text accessibilityRole="header" style={styles.title}>Friends</Text>
       <Text style={styles.message}>Find someone by their exact username. Friendship alone does not share habits. Pull down to refresh.</Text>
-      <Link href="/home" style={styles.message}>Home</Link>
+      <Link href="/home" style={styles.message}>Navigation menu</Link>
       {(loading || (!hasLoaded && !error)) && <ActivityIndicator accessibilityLabel="Loading friends" size="large" />}
       {error && <View style={localStyles.group}>
         <Text accessibilityLiveRegion="polite" style={styles.message}>{error}</Text>

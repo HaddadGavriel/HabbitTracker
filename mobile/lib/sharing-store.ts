@@ -22,8 +22,8 @@ const emptyState = (): SharingState => ({
   habit: null, friends: [], grants: [], hasLoaded: false, loading: false, refreshing: false,
   unavailable: false, error: null, actionError: null, notice: null, pendingAction: null, refreshRequired: false,
 });
-const sessionMessage = 'Unable to verify your session. Retry, or return Home to sign out and sign in again.';
-const profileMessage = 'Your profile is unavailable. Return Home to sign out and sign in again to complete onboarding.';
+const sessionMessage = 'Unable to verify your session. Retry, or open Settings to sign out and sign in again.';
+const profileMessage = 'Your profile is unavailable. Open Settings to sign out and sign in again to complete onboarding.';
 const missingMessage = 'This habit was not found or is no longer available to your account.';
 function readError(error: unknown) {
   if (error instanceof ApiError) {

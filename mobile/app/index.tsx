@@ -1,4 +1,5 @@
-import { Button, Text } from 'react-native';
+import { Button } from '../components/ui';
+import { Text } from 'react-native';
 import { Form, Loading, Message, styles } from '../components/form';
 import { useSession } from '../lib/session';
 export default function Startup() {

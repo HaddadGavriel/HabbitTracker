@@ -1,0 +1,150 @@
+appId: com.haddadgavriel.habittracker
+name: Two users - request, share, remind, excuse, decision, revoke
+---
+# Runs after owner.yaml against the same fresh stack, alternating two accounts.
+- launchApp
+- runFlow:
+    file: sign-in.yaml
+    env:
+      EMAIL: alice@habittracker.test
+- runFlow:
+    file: create-binary.yaml
+    env:
+      HABIT: Smoke shared
+- runFlow:
+    file: sign-out.yaml
+- tapOn:
+    id: field-email
+- inputText: bob@habittracker.test
+- tapOn:
+    id: field-password
+- inputText: Smoke-only-123!
+- hideKeyboard
+- tapOn: Sign in
+- extendedWaitUntil:
+    visible: Set up your profile
+    timeout: 20000
+- runFlow:
+    file: onboard.yaml
+    env:
+      USERNAME: smoke_bob
+      NAME: Bob
+- runFlow:
+    file: menu.yaml
+    env:
+      DESTINATION: Friends
+- tapOn: Exact username
+- inputText: smoke_alice
+- hideKeyboard
+- tapOn: Search
+- tapOn: Send request to @smoke_alice
+- runFlow:
+    file: sign-out.yaml
+- runFlow:
+    file: sign-in.yaml
+    env:
+      EMAIL: alice@habittracker.test
+- runFlow:
+    file: menu.yaml
+    env:
+      DESTINATION: Friends
+- scrollUntilVisible:
+    element: Accept request from @smoke_bob
+- tapOn: Accept request from @smoke_bob
+- runFlow:
+    file: menu.yaml
+    env:
+      DESTINATION: My habits
+- scrollUntilVisible:
+    element: Manage sharing for Smoke shared
+- tapOn: Manage sharing for Smoke shared
+- scrollUntilVisible:
+    element: Grant access for @smoke_bob
+- tapOn: Grant access for @smoke_bob
+- assertVisible: Sharing grant enabled
+- runFlow:
+    file: sign-out.yaml
+- runFlow:
+    file: sign-in.yaml
+    env:
+      EMAIL: bob@habittracker.test
+- runFlow:
+    file: menu.yaml
+    env:
+      DESTINATION: Friends’ habits
+- assertNotVisible: Smoke walk
+- assertNotVisible: Smoke reading
+- scrollUntilVisible:
+    element: Remind Alice Smoke about Smoke shared
+- tapOn: Remind Alice Smoke about Smoke shared
+- extendedWaitUntil:
+    visible: '.*Accepted by the notification provider.*'
+    timeout: 20000
+- runFlow:
+    file: sign-out.yaml
+- runFlow:
+    file: sign-in.yaml
+    env:
+      EMAIL: alice@habittracker.test
+- runFlow:
+    file: menu.yaml
+    env:
+      DESTINATION: Today
+- scrollUntilVisible:
+    element: Submit excuse for Smoke shared
+- tapOn: Submit excuse for Smoke shared
+- scrollUntilVisible:
+    element: Explanation for Smoke shared
+- tapOn: Explanation for Smoke shared
+- inputText: Smoke test appointment
+- hideKeyboard
+- scrollUntilVisible:
+    element: Submit and lock occurrence
+- tapOn: Submit and lock occurrence
+- assertVisible: '.*pending.*'
+- runFlow:
+    file: sign-out.yaml
+- runFlow:
+    file: sign-in.yaml
+    env:
+      EMAIL: bob@habittracker.test
+- runFlow:
+    file: menu.yaml
+    env:
+      DESTINATION: Pending decisions
+- scrollUntilVisible:
+    element: 'Approve excuse for Smoke shared on .*'
+- tapOn: 'Approve excuse for Smoke shared on .*'
+- scrollUntilVisible:
+    element: Confirm approval
+- tapOn: Confirm approval
+- assertVisible: Current final decision
+- runFlow:
+    file: sign-out.yaml
+- runFlow:
+    file: sign-in.yaml
+    env:
+      EMAIL: alice@habittracker.test
+- runFlow:
+    file: menu.yaml
+    env:
+      DESTINATION: My habits
+- scrollUntilVisible:
+    element: Manage sharing for Smoke shared
+- tapOn: Manage sharing for Smoke shared
+- scrollUntilVisible:
+    element: Revoke access for @smoke_bob
+- tapOn: Revoke access for @smoke_bob
+- assertVisible: No permission to view this habit
+- runFlow:
+    file: sign-out.yaml
+- runFlow:
+    file: sign-in.yaml
+    env:
+      EMAIL: bob@habittracker.test
+- runFlow:
+    file: menu.yaml
+    env:
+      DESTINATION: Friends’ habits
+- assertVisible: 'No habits are currently shared with you.*'
+- takeScreenshot: e2e/artifacts/social-revoked

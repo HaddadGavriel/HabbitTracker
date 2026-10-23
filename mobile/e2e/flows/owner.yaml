@@ -1,0 +1,148 @@
+appId: com.haddadgavriel.habittracker
+name: Owner journey - isolated native UI and real local API/PostgREST
+---
+- launchApp:
+    clearState: true
+- tapOn: Create an account
+- tapOn:
+    id: field-email
+- inputText: alice@habittracker.test
+- tapOn:
+    id: field-password
+- inputText: Smoke-only-123!
+- hideKeyboard
+- tapOn: Sign up
+- extendedWaitUntil:
+    visible: Set up your profile
+    timeout: 20000
+- runFlow:
+    file: onboard.yaml
+    env:
+      USERNAME: smoke_alice
+      NAME: Alice
+- runFlow:
+    file: create-binary.yaml
+    env:
+      HABIT: Smoke walk
+- runFlow:
+    file: menu.yaml
+    env:
+      DESTINATION: Today
+- tapOn: Complete Smoke walk
+- assertVisible: Undo Smoke walk
+- tapOn: Undo Smoke walk
+- assertVisible: Complete Smoke walk
+- runFlow:
+    file: menu.yaml
+    env:
+      DESTINATION: My habits
+- tapOn: View history for Smoke walk
+- assertVisible: Current streak
+- back
+- assertVisible: Edit Smoke walk
+- tapOn: Edit Smoke walk
+- scrollUntilVisible:
+    element: Archive habit
+- tapOn: Archive habit
+- scrollUntilVisible:
+    element: Confirm archive
+- tapOn: Confirm archive
+- tapOn: Archived
+- tapOn: Restore Smoke walk
+- scrollUntilVisible:
+    element: Confirm restore
+    direction: UP
+- tapOn: Confirm restore
+- tapOn: Active
+- assertVisible: Edit Smoke walk
+- tapOn: Create habit
+- tapOn:
+    id: field-name
+- inputText: Smoke reading
+- hideKeyboard
+- scrollUntilVisible:
+    element: Target
+- tapOn: Target
+- scrollUntilVisible:
+    element:
+      id: field-target-positive-whole-number
+- tapOn:
+    id: field-target-positive-whole-number
+- inputText: '10'
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: field-unit-optional
+- tapOn:
+    id: field-unit-optional
+- inputText: pages
+- hideKeyboard
+- scrollUntilVisible:
+    element: Selected weekdays
+- tapOn: Selected weekdays
+- scrollUntilVisible:
+    element: Monday
+- tapOn: Monday
+- scrollUntilVisible:
+    element: Tuesday
+- tapOn: Tuesday
+- scrollUntilVisible:
+    element: Wednesday
+- tapOn: Wednesday
+- scrollUntilVisible:
+    element: Thursday
+- tapOn: Thursday
+- scrollUntilVisible:
+    element: Friday
+- tapOn: Friday
+- scrollUntilVisible:
+    element: Saturday
+- tapOn: Saturday
+- scrollUntilVisible:
+    element: Sunday
+- tapOn: Sunday
+- scrollUntilVisible:
+    element: 'Reminder times \(HH:MM, separated by commas\)'
+- tapOn:
+    id: field-reminder-times-hh-mm-separated-by-commas
+- inputText: 09:00, 20:00
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: submit-habit
+- tapOn:
+    id: submit-habit
+- runFlow:
+    file: menu.yaml
+    env:
+      DESTINATION: Today
+- scrollUntilVisible:
+    element: Total progress for Smoke reading
+- tapOn: Total progress for Smoke reading
+- eraseText
+- inputText: '10'
+- hideKeyboard
+- tapOn: Save progress for Smoke reading
+- assertVisible: 'Progress: 10 / 10 pages'
+- runFlow:
+    file: menu.yaml
+    env:
+      DESTINATION: Settings
+- tapOn:
+    id: field-display-name
+- eraseText
+- inputText: Alice Smoke
+- hideKeyboard
+- scrollUntilVisible:
+    element: Save settings
+- tapOn: Save settings
+- assertVisible: Profile saved.
+- runFlow:
+    file: sign-out.yaml
+- openLink: habittrackerinfra://today
+- assertVisible: Email
+- takeScreenshot: e2e/artifacts/owner-signed-out-guard
+- openLink: 'habittrackerinfra://auth-callback?type=recovery&error=access_denied'
+- assertVisible: 'This authentication link is invalid.*'
+- tapOn: Back to app
+- assertVisible: Email

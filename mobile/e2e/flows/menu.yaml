@@ -1,0 +1,4 @@
+appId: com.haddadgavriel.habittracker
+---
+- tapOn: Open navigation menu
+- tapOn: ${DESTINATION}

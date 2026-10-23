@@ -1,6 +1,7 @@
+import { Button, Link } from '../components/ui';
 import { useState } from 'react';
-import { Link } from 'expo-router';
-import { Button, Text } from 'react-native';
+
+import { Text } from 'react-native';
 import { Field, Form, Message, styles } from '../components/form';
 import { EmailRequest } from '../lib/email-request';
 import { supabase } from '../lib/supabase';

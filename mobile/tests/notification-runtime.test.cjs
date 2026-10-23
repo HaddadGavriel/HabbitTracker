@@ -95,6 +95,7 @@ test('Settings and Diagnostics share controls; controls expose safe status and i
   const jsx = (type, props) => typeof type === 'function' ? type(props) : { type, props };
   const controls = compile('components/notification-controls.tsx', name => ({
     react: { useState: x => [x, () => {}], useSyncExternalStore: (_, snapshot) => snapshot() },
+    ...require('./native-ui-support.cjs'),
     'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { Button: 'Button', Text: 'Text', View: 'View' },
     '../lib/notification-runtime': { notificationService: service, openNotificationSettings: async () => calls.push('settings') },
     '../lib/local-reminder-runtime': { localReminderService: { snapshot: () => localState, subscribe() {}, disable: async () => calls.push('local-disable') } },

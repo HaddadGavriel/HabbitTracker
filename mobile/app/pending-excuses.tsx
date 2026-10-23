@@ -1,6 +1,7 @@
+import { Button, Link } from '../components/ui';
 import { useCallback, useState, useSyncExternalStore } from 'react';
-import { Link, useFocusEffect } from 'expo-router';
-import { ActivityIndicator, AppState, Button, ScrollView, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import { ActivityIndicator, AppState, ScrollView, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { styles } from '../components/form';
 import { ExcuseView } from '../components/excuse-view';
 import { decideExcuse, listPendingExcuses, readExcuse } from '../lib/api';
@@ -22,7 +23,7 @@ export default function PendingExcuses() {
     refreshControl={<RefreshControl refreshing={loading} onRefresh={store.refresh} />}>
     <Text accessibilityRole="header" style={styles.title}>Pending excuse decisions</Text>
     <Text style={styles.message}>Excuses from habits currently shared with you, including earlier dates. Decisions have no midnight deadline. The first valid approval or rejection is final.</Text>
-    <Link href="/home" style={styles.message}>Home</Link>
+    <Link href="/home" style={styles.message}>Navigation menu</Link>
     <Link href="/shared-habits" style={styles.message}>Friends’ habits</Link>
     <Button title="Refresh current decisions" onPress={store.refresh} disabled={loading || deciding} />
     {(loading || deciding) && <ActivityIndicator accessibilityLabel={deciding ? 'Saving decision' : 'Loading pending excuses'} />}
@@ -33,7 +34,7 @@ export default function PendingExcuses() {
       <Text accessibilityRole="header" style={styles.label}>Current final decision</Text>
       <ExcuseView excuse={resolved} occurrence={resolved.occurrence} />
     </View>}
-    {hasLoaded && !excuses.length && <Text style={styles.message}>No excuses currently need your decision. Archived habits and excuses you can no longer access are hidden.</Text>}
+    {hasLoaded && !loading && !error && !excuses.length && <Text style={styles.message}>No excuses currently need your decision. Archived habits and excuses you can no longer access are hidden.</Text>}
     {excuses.map(excuse => <View key={excuse.id} style={localStyles.card}>
       <ExcuseView excuse={excuse} occurrence={excuse.occurrence} />
       {confirmation?.excuse === excuse ? <View style={localStyles.confirmation}>

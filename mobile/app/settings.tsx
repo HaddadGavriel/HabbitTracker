@@ -1,7 +1,8 @@
+import { Button, Link } from '../components/ui';
 import { useAccountDeletion } from '../components/account-deletion-gate';
 import { useRef, useState } from 'react';
-import { Button, Text } from 'react-native';
-import { Link } from 'expo-router';
+import { Alert, Text } from 'react-native';
+
 import { Field, Form, Message, styles } from '../components/form';
 import { NotificationControls } from '../components/notification-controls';
 import { ApiError } from '../lib/api';
@@ -70,6 +71,10 @@ export default function Settings() {
       <Button title="Permanently delete my account" color="#b00020" disabled={busy || !password || confirmation !== 'DELETE MY ACCOUNT'} onPress={deleteAccount} />
       <Button title="Cancel deletion" onPress={() => { setPassword(''); setConfirmation(''); setDeleting(false); }} />
     </>}
-    <Link href="/home" style={styles.message}>Back to home</Link><Button title="Sign out" onPress={store.signOut} />
+    {process.env.EXPO_PUBLIC_ENABLE_DIAGNOSTICS === 'true' && <Link href="/diagnostics">Diagnostics</Link>}
+    <Link href="/home">Navigation menu</Link>
+    <Button title="Sign out" disabled={busy} onPress={() => Alert.alert('Sign out?', 'Local habit reminders will stop on this device. You can sign in again to continue.', [
+      { text: 'Cancel', style: 'cancel' }, { text: 'Sign out', onPress: () => { void store.signOut(); } },
+    ])} />
   </Form>;
 }

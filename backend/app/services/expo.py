@@ -18,7 +18,7 @@ class ExpoPushService:
             "to": token,
             "sound": "default",
             "channelId": "infrastructure-tests",
-            "title": "Infrastructure Test Passed",
+            "title": "Habit Tracker diagnostics",
             "body": f"Request {request_id} completed successfully.",
             "data": {"request_id": request_id, "server_timestamp": server_timestamp},
         }

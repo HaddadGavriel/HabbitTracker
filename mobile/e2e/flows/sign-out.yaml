@@ -1,0 +1,14 @@
+appId: com.haddadgavriel.habittracker
+---
+- runFlow:
+    file: menu.yaml
+    env:
+      DESTINATION: Settings
+- scrollUntilVisible:
+    element: Sign out
+    direction: DOWN
+- tapOn: Sign out
+- tapOn: Sign out
+- extendedWaitUntil:
+    visible: Email
+    timeout: 20000

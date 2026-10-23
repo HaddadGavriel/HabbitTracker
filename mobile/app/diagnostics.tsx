@@ -1,6 +1,7 @@
+import { Button } from '../components/ui';
 import * as Notifications from 'expo-notifications';
 import { useEffect, useRef, useState } from 'react';
-import { Button, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { runInfrastructureTest, type TestResult } from '../lib/api';
 import { useSession } from '../lib/session';
@@ -46,7 +47,7 @@ function InfrastructureScreen() {
       const response = await runInfrastructureTest(session, requestId, new Date(started).toISOString());
       if (!alive.current) return;
       setRoundTrip(Date.now() - started); setResult(response); setMessage('Backend flow succeeded. Waiting for the remote notification.');
-    } catch (error) { if (!alive.current) return; setRoundTrip(Date.now() - started); setMessage(`Infrastructure test failed: ${error instanceof Error ? error.message : String(error)}`); }
+    } catch (error) { if (!alive.current) return; setRoundTrip(Date.now() - started); setMessage('Diagnostic request failed. Check your connection and server configuration.'); }
     finally { submitting.current = false; if (alive.current) setBusy(false); }
   }
 
@@ -59,14 +60,14 @@ function InfrastructureScreen() {
     { label: 'Phone receipt', value: receivedRequestId ? `Received ${receivedRequestId}` : 'Waiting / app was backgrounded', ok: !!receivedRequestId },
   ];
 
-  return <SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.container}>
-    <Text style={styles.title}>Infrastructure Test</Text>
+  return <ScrollView contentContainerStyle={styles.container}>
+    <Text style={styles.title}>Diagnostics</Text>
     <NotificationControls />
-    <View style={styles.primary}><Button title="Run Infrastructure Test" disabled={busy || !session || !registered} onPress={runTest} /></View>
+    <View style={styles.primary}><Button title="Send diagnostic notification" disabled={busy || !session || !registered} onPress={() => Alert.alert('Send diagnostic notification?', 'This writes a diagnostic record and sends a real push notification to this account’s registered device.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Send', onPress: () => { void runTest(); } }])} /></View>
     <Text style={styles.message}>{message}</Text>
     {stages.map((stage) => <View style={styles.stage} key={stage.label}><Text style={styles.stageTitle}>{stage.ok ? '✓' : '○'} {stage.label}</Text><Text>{stage.value}</Text></View>)}
     {result && <View style={styles.card}><Text>Request ID: {result.request_id}</Text><Text>Client → API → Client: {roundTrip} ms</Text><Text>Backend total: {result.timings_ms.server_total} ms</Text><Text>Server received: {result.server_received_at}</Text></View>}
-  </ScrollView></SafeAreaView>;
+  </ScrollView>;
 }
 
 const styles = StyleSheet.create({ safe: { flex: 1 }, container: { padding: 20, gap: 14 }, title: { fontSize: 28, fontWeight: '700' }, card: { padding: 14, backgroundColor: '#eef1f4', borderRadius: 8, gap: 10 }, input: { backgroundColor: 'white', padding: 12, borderWidth: 1, borderColor: '#aaa', borderRadius: 6 }, row: { flexDirection: 'row', justifyContent: 'space-between', gap: 10 }, primary: { backgroundColor: '#1769aa', padding: 8, borderRadius: 8 }, message: { fontWeight: '600' }, stage: { paddingVertical: 8, borderBottomWidth: 1, borderColor: '#ddd' }, stageTitle: { fontSize: 16, fontWeight: '600' } });

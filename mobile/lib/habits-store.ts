@@ -24,7 +24,7 @@ const emptyState = (status: HabitFilter = 'active', restoringId: string | null =
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
-    if (error.status === 401) return 'Unable to verify your session. Retry, or return Home to sign out and sign in again.';
+    if (error.status === 401) return 'Unable to verify your session. Retry, or open Settings to sign out and sign in again.';
     if (error.code === 'request_timeout') return 'Loading habits timed out. Please retry.';
     if (error.code === 'network_error') return 'Unable to load your habits. Check your connection and retry.';
   }
@@ -159,7 +159,7 @@ export class HabitsStore {
       const message = !definite
         ? 'We could not confirm whether this habit was restored. It may have succeeded. Refresh current server state before deciding to restore again.'
         : error instanceof ApiError && error.status === 401
-          ? 'Unable to verify your session. Return Home to sign out and sign in again, or retry restoring.'
+          ? 'Unable to verify your session. Open Settings to sign out and sign in again, or retry restoring.'
           : error instanceof ApiError && error.code === 'habit_not_found'
             ? 'This habit is no longer available. Refresh your habits to check the current server state.'
             : 'Unable to restore this habit. Please try again.';

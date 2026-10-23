@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from uuid import UUID
 
 import httpx
 from fastapi import Depends, HTTPException
@@ -21,15 +22,25 @@ async def get_authenticated_user(
 ) -> AuthenticatedUser:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(status_code=401, detail="A Supabase access token is required")
-    async with httpx.AsyncClient(timeout=10) as client:
-        response = await client.get(
-            f"{settings.supabase_url.rstrip('/')}/auth/v1/user",
-            headers={"apikey": settings.supabase_publishable_key, "Authorization": f"Bearer {credentials.credentials}"},
-        )
-    if response.status_code != 200:
-        raise HTTPException(status_code=401, detail="Invalid or expired Supabase access token")
-    payload = response.json()
-    return AuthenticatedUser(id=payload["id"], email=payload.get("email"))
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                f"{settings.supabase_url.rstrip('/')}/auth/v1/user",
+                headers={"apikey": settings.supabase_publishable_key, "Authorization": f"Bearer {credentials.credentials}"},
+            )
+        if response.status_code in (401, 403):
+            raise HTTPException(status_code=401, detail="Invalid or expired Supabase access token")
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or not isinstance(payload.get("id"), str):
+            raise ValueError("Invalid identity response")
+        identity = str(UUID(payload["id"]))
+        email = payload.get("email")
+        if email is not None and not isinstance(email, str):
+            raise ValueError("Invalid identity response")
+        return AuthenticatedUser(id=identity, email=email)
+    except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        raise HTTPException(status_code=503, detail={"code": "auth_unavailable", "message": "Unable to verify your session. Please retry."}) from None
 
 
 async def get_current_user(user: AuthenticatedUser = Depends(get_authenticated_user),

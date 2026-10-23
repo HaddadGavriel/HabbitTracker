@@ -1,0 +1,19 @@
+appId: com.haddadgavriel.habittracker
+---
+- tapOn:
+    id: field-username
+- inputText: ${USERNAME}
+- tapOn:
+    id: field-display-name
+- inputText: ${NAME}
+- tapOn:
+    id: field-iana-timezone
+- eraseText
+- inputText: UTC
+- hideKeyboard
+- scrollUntilVisible:
+    element: Create profile
+- tapOn: Create profile
+- extendedWaitUntil:
+    visible: Open navigation menu
+    timeout: 20000
