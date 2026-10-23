@@ -18,13 +18,20 @@ mutation or real push occurred. This is **not production/device verification**.
 | `npx expo export --platform android` | Pass, Android Hermes bundle ~3.9 MB. Uses loopback fixture URLs/public key; not a release APK. |
 | Pinned Maestro 2.0.10 official `YamlCommandReader` | Owner and social flows parse, including referenced subflows. Command documented in `mobile/e2e/README.md`. |
 | `maestro test …` | **Not executed on device**: CLI reports “Not enough devices connected (0)”. Native UI journeys remain manual-verification-pending, not passed. |
-| `./gradlew :app:assembleRelease --no-daemon --max-workers=2` | **Blocked**. Gradle 9.3.1 starts with JDK 21 and configured proxy/CA, then cannot resolve the required JDK 17 toolchain (resolver HTTP 403). This workspace also has no Android SDK/emulator. No APK or full native adapter/Expo module build is claimed. Existing native CI and the new manual emulator workflow retain those checks. |
+| `./gradlew :app:assembleRelease --no-daemon --max-workers=2` locally | **Blocked**. Gradle 9.3.1 starts with JDK 21 and configured proxy/CA, then cannot resolve the required JDK 17 toolchain (resolver HTTP 403). This workspace also has no Android SDK/emulator. No full application APK is claimed. Native module CI evidence is recorded below; the manual emulator workflow remains unexecuted. |
 | Source/security/config review | No private credential-pattern findings in tracked source; no credentials or tokens added to logs. Diagnostics now default off server/client, confirm before sending, and redact provider failures. Safe Auth/upstream errors, guarded routes, session-bound listeners and cancellation regressions reviewed. `git diff --check` passes. |
 
 The first PostgreSQL attempt used an **external workspace helper** with stale role
 scaffolding and failed 37 permission checks. The committed runner uses the actual
 repository scaffold in a new container and passes all checks. No migration or
 regression assertion was weakened to mask those failures.
+
+GitHub Actions also passed on implementation commit
+`9d36cf2bbfc1ed3f0ef901f312f55b1f33c074d0`:
+
+- [Mobile tests and typecheck](https://github.com/HaddadGavriel/HabbitTracker/actions/runs/39935781877).
+- [Backend API and disposable PostgreSQL tests](https://github.com/HaddadGavriel/HabbitTracker/actions/runs/39935781888).
+- [Local reminder native verification](https://github.com/HaddadGavriel/HabbitTracker/actions/runs/39935781943): both Android builds succeeded; the full module AAR contains the Expo bridge, and **29 Android adapter tests passed, 0 failed/errors/skipped**. This verifies native module compilation and JVM/Robolectric adapters, not a full application APK or device delivery. The run retains test reports and the AAR as artifacts.
 
 Native automation is reproducible through `mobile/e2e/README.md` and the manual
 `Android native smoke (isolated services)` workflow. Ordinary PR CI continues to
