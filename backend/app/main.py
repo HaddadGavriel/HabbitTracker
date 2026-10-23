@@ -1,3 +1,5 @@
+import httpx
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
@@ -39,3 +41,13 @@ async def redact_account_validation(request: Request, exc: RequestValidationErro
     if request.url.path.startswith('/account/deletion'):
         return JSONResponse(status_code=422, content={'detail': {'code': 'invalid_deletion_request', 'message': 'Check confirmation, password and recovery receipt.'}})
     return await request_validation_exception_handler(request, exc)
+
+
+@app.exception_handler(httpx.HTTPError)
+async def service_unavailable(_request: Request, _exc: httpx.HTTPError):
+    # Do not send provider response bodies, URLs or credentials to the client.
+    # A timed-out write may have committed; callers must reconcile before retry.
+    return JSONResponse(status_code=503, content={'detail': {
+        'code': 'service_unavailable',
+        'message': 'Unable to confirm the server response. Check your connection and refresh before retrying a change.',
+    }})

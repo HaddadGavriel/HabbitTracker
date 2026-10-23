@@ -1,6 +1,7 @@
+import { Button, Link } from '../components/ui';
 import { useCallback, useState, useSyncExternalStore } from 'react';
-import { Link, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { ActivityIndicator, AppState, Button, RefreshControl, ScrollView, Text } from 'react-native';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { ActivityIndicator, AppState, RefreshControl, ScrollView, Text } from 'react-native';
 import { Form, Message, styles } from '../components/form';
 import { ExcuseView } from '../components/excuse-view';
 import { readExcuse } from '../lib/api';
@@ -10,7 +11,7 @@ import { useSession } from '../lib/session';
 export default function ExcuseDetail() {
   const { occurrenceId } = useLocalSearchParams<{ occurrenceId?: string | string[] }>();
   if (typeof occurrenceId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(occurrenceId)) {
-    return <Form><Message text="This excuse link is invalid." /><Link href="/home" style={styles.message}>Home</Link></Form>;
+    return <Form><Message text="This excuse link is invalid." /><Link href="/home" style={styles.message}>Navigation menu</Link></Form>;
   }
   return <Detail key={occurrenceId.toLowerCase()} occurrenceId={occurrenceId.toLowerCase()} />;
 }
@@ -26,7 +27,7 @@ function Detail({ occurrenceId }: { occurrenceId: string }) {
   return <ScrollView contentContainerStyle={styles.form}
     refreshControl={<RefreshControl refreshing={loading} onRefresh={store.refresh} />}>
     <Text accessibilityRole="header" style={styles.title}>Excuse details</Text>
-    <Link href="/home" style={styles.message}>Home</Link>
+    <Link href="/home" style={styles.message}>Navigation menu</Link>
     <Button title="Refresh excuse" onPress={store.refresh} disabled={loading} />
     {loading && <ActivityIndicator accessibilityLabel="Loading excuse" />}
     {error && <Text accessibilityLiveRegion="polite" style={styles.message}>{error}</Text>}

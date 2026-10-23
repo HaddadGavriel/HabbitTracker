@@ -16,7 +16,7 @@ export function AuthLinkProvider({ children }: { children: ReactNode }) {
     void listener.ready.finally(() => { if (active) setInitialized(true); });
     return () => { active = false; listener.stop(); };
   }, [store]);
-  return <Context.Provider value={store}>{initialized ? children : <Form><Loading /></Form>}</Context.Provider>;
+  return <Context.Provider value={store}>{initialized ? children : <Form standalone><Loading /></Form>}</Context.Provider>;
 }
 export function useAuthLink() {
   const store = useContext(Context);

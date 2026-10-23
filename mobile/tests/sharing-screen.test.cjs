@@ -30,6 +30,7 @@ async function screen(options = {}) {
     return jsx(type, props, key);
   };
   const modules = {
+    ...require('./native-ui-support.cjs'),
     'react/jsx-runtime': { jsx: routeJSX, jsxs: routeJSX, Fragment: 'Fragment' },
     react: { useCallback: fn => fn, useState: initial => [store ??= initial()], useSyncExternalStore: (_subscribe, snapshot) => snapshot() },
     'expo-router': { Link: 'Link', useFocusEffect: callback => { focus = callback; }, useLocalSearchParams: () => ({ id }),

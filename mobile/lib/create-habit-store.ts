@@ -9,7 +9,7 @@ const initialState = (): CreationState => ({ draft: emptyHabitDraft(), busy: fal
 
 function creationError(error: unknown): Pick<CreationState, 'error' | 'ambiguous'> {
   if (error instanceof ApiError) {
-    if (error.status === 401 || error.status === 403) return { ambiguous: false, error: 'Your session could not be verified. Return Home to sign out and sign in again.' };
+    if (error.status === 401 || error.status === 403) return { ambiguous: false, error: 'Your session could not be verified. Open Settings to sign out and sign in again.' };
     if (error.code === 'configuration_error') return { ambiguous: false, error: 'The app API address is missing. Check the app configuration.' };
     if (error.status !== null && error.status >= 400 && error.status < 500 && error.code !== 'request_timeout') {
       return { ambiguous: false, error: error.message };

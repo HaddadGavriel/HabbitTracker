@@ -43,6 +43,7 @@ function mount(overrides = {}) {
   const sessions = { snapshot: () => ({ status: 'ready', session: currentSession }),
     subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); } };
   const modules = {
+    ...require('./native-ui-support.cjs'),
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     react: { useCallback: fn => fn, useState: init => [store ??= init()],
       useSyncExternalStore: (_subscribe, snapshot) => snapshot() },

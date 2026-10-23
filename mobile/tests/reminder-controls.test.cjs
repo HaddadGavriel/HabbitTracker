@@ -27,6 +27,7 @@ function ui(requests = [], changes = {}) {
   const session = { user: { id: 'sender' } };
   const Component = compile('components/reminder-controls.tsx', name => ({
     react: { useEffect: fn => effects.push(fn), useState: () => [0, () => {}], useSyncExternalStore: (_, get) => get() },
+    ...require('./native-ui-support.cjs'),
     'react/jsx-runtime': { jsx, jsxs: jsx },
     'react-native': { Alert: { alert: (...args) => alerts.push(args) }, Button: 'Button', Text: 'Text', View: 'View' },
     '../lib/reminder-rules': { ...rules, reminderEligible: (h, started) => rules.reminderEligible(h, started, clock) },

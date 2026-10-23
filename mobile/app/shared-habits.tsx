@@ -1,6 +1,7 @@
+import { Button, Link } from '../components/ui';
 import { useCallback, useState, useSyncExternalStore } from 'react';
-import { Link, useFocusEffect } from 'expo-router';
-import { ActivityIndicator, AppState, Button, FlatList, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import { ActivityIndicator, AppState, FlatList, StyleSheet, Text, View } from 'react-native';
 import { styles } from '../components/form';
 import { ReminderControls } from '../components/reminder-controls';
 import { SharedHabitView } from '../components/shared-habit-view';
@@ -29,7 +30,7 @@ export default function SharedHabits() {
     ListHeaderComponent={<View style={localStyles.section}>
       <Text accessibilityRole="header" style={styles.title}>Friends’ habits</Text>
       <Text style={styles.message}>Only habits a friend explicitly shares with you appear here. Friendship alone does not grant access. Pull down to refresh.</Text>
-      <Link href="/home" style={styles.message}>Home</Link>
+      <Link href="/home" style={styles.message}>Navigation menu</Link>
       <Link href="/friends" style={styles.message}>Friends</Link>
       <Button title="Refresh" onPress={store.refresh} disabled={busy} />
       {busy && <ActivityIndicator accessibilityLabel="Loading shared habits" size="large" />}

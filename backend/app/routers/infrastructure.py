@@ -3,6 +3,7 @@ from time import perf_counter
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from ..config import get_settings, Settings
 from ..auth import AuthenticatedUser, get_current_user
 from ..dependencies import get_database, get_push_service
 from ..schemas import InfrastructureTestRequest, InfrastructureTestResult, Timings
@@ -15,10 +16,13 @@ router = APIRouter(tags=["infrastructure"])
 @router.post("/infrastructure-test", response_model=InfrastructureTestResult)
 async def infrastructure_test(
     body: InfrastructureTestRequest,
+    settings: Settings = Depends(get_settings),
     user: AuthenticatedUser = Depends(get_current_user),
     database: SupabaseDatabase = Depends(get_database),
     push: ExpoPushService = Depends(get_push_service),
 ) -> InfrastructureTestResult:
+    if not settings.enable_diagnostics:
+        raise HTTPException(status_code=404, detail="Diagnostics are disabled")
     started = perf_counter()
     received_at = datetime.now(timezone.utc)
     database_started = perf_counter()
@@ -35,7 +39,7 @@ async def infrastructure_test(
         ticket_id = await push.send(token, body.request_id, received_at.isoformat())
     except Exception as exc:
         await database.mark_push(body.request_id, None, "push_failed")
-        raise HTTPException(status_code=502, detail=f"Expo push request failed: {exc}") from exc
+        raise HTTPException(status_code=502, detail="Diagnostic push request failed") from exc
     push_ms = round((perf_counter() - push_started) * 1000)
     await database.mark_push(body.request_id, ticket_id, "push_accepted")
     return InfrastructureTestResult(

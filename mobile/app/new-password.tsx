@@ -1,5 +1,6 @@
+import { Button } from '../components/ui';
 import { useState } from 'react';
-import { Button, Text } from 'react-native';
+import { Text } from 'react-native';
 import { Field, Form, Message, styles } from '../components/form';
 import { useAuthLink } from '../lib/auth-link-context';
 export default function NewPassword() {

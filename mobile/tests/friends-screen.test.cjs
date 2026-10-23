@@ -47,7 +47,7 @@ function text(tree) {
   return tree && typeof tree === 'object' ? text(tree.props.children) : '';
 }
 async function screen({ api = {}, initial = session(), readProfile = async s => fullProfile(s.user.id) } = {}) {
-  let authEvent, store, focus, cleanup;
+  let authEvent, store, focus, cleanup, foreground;
   const calls = [];
   const auth = {
     getSession: async () => ({ data: { session: initial } }),
@@ -66,10 +66,11 @@ async function screen({ api = {}, initial = session(), readProfile = async s => 
     return (api[name] ?? fallback)(...args);
   }]));
   const modules = {
+    ...require('./native-ui-support.cjs'),
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     react: { useCallback: fn => fn, useState: initial => [store ??= initial()], useSyncExternalStore: (_subscribe, snapshot) => snapshot() },
     'expo-router': { Link: 'Link', useFocusEffect: callback => { focus = callback; } },
-    'react-native': { ActivityIndicator: 'ActivityIndicator', Button: 'Button', KeyboardAvoidingView: 'KeyboardAvoidingView',
+    'react-native': { AppState: { currentState: 'active', addEventListener: (_event, listener) => { foreground = listener; return { remove() { foreground = null; } }; } }, ActivityIndicator: 'ActivityIndicator', Button: 'Button', KeyboardAvoidingView: 'KeyboardAvoidingView',
       Platform: { OS: 'android' }, RefreshControl: 'RefreshControl', ScrollView: 'ScrollView', Text: 'Text', View: 'View', StyleSheet: { create: value => value } },
     '../components/form': { Field: 'Field', styles: {} },
     '../lib/api': mockedAPI,
@@ -82,6 +83,7 @@ async function screen({ api = {}, initial = session(), readProfile = async s => 
   cleanup = focus();
   await flush();
   const ui = {
+    foreground: value => foreground?.(value), hasForegroundListener: () => !!foreground,
     render, calls, sessions, auth, state: () => store.snapshot(),
     texts: () => render().filter(node => node.type === 'Text').map(text),
     text: () => ui.texts().join(' '),
@@ -305,13 +307,14 @@ test('Home links to Friends and shared habits; friendship and sharing routes req
   let state;
   const Stack = { Protected: 'Protected', Screen: 'Screen' };
   const dependencies = {
+    ...require('./native-ui-support.cjs'),
     'react/jsx-runtime': { jsx, jsxs: jsx },
     'expo-router': { Stack, Link: 'Link' },
     'expo-notifications': { setNotificationHandler() {} },
     '../components/account-deletion-gate': { AccountDeletionGate: p => p.children, useAccountDeletion: () => ({ begin: async () => {} }) },
     '../components/notification-tap-gate': { NotificationTapGate: 'NotificationTapGate' },
     '../lib/notification-runtime': { notificationService: { canPresent: () => false } },
-    'react-native': { Button: 'Button', Text: 'Text' },
+    'react-native': { AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) }, Button: 'Button', Text: 'Text' },
     '../components/form': { Form: 'Form', styles: {} },
     '../lib/session': { SessionProvider: ({ children }) => children, useSession: () => state },
     '../lib/session-store': { routeAccess },
@@ -690,4 +693,18 @@ test('a missing caller profile clears relationship and search cards and explains
   assert.equal(ui.button('Send request'), undefined);
   assert.equal(ui.state().hasLoaded, false);
   assert.ok(ui.button('Retry loading'));
+});
+
+
+test('foreground refresh reveals externally accepted friendship and removes its listener on blur', async () => {
+  let friends = [];
+  const ui = await screen({ api: { listFriends: async () => friends } });
+  assert.match(ui.text(), /No friends yet/);
+  friends = [accepted()];
+  ui.foreground('background'); ui.foreground('active'); await flush();
+  assert.match(ui.text(), /@bob_2/);
+  assert.equal(count(ui, 'listFriends'), 2);
+  ui.foreground('active'); await flush();
+  assert.equal(count(ui, 'listFriends'), 2);
+  ui.leave(); assert.equal(ui.hasForegroundListener(), false);
 });

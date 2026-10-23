@@ -39,7 +39,7 @@ export function parseProgress(value: string): number {
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
-    if (error.status === 401) return 'Unable to verify your session. Retry, or return Home to sign out and sign in again.';
+    if (error.status === 401) return 'Unable to verify your session. Retry, or open Settings to sign out and sign in again.';
     if (error.code === 'request_timeout') return 'Loading Today timed out. Please retry.';
     if (error.code === 'network_error') return 'Unable to load Today. Check your connection and retry.';
   }
@@ -433,7 +433,7 @@ export class TodayStore {
         : code === 'occurrence_not_found' ? 'This occurrence is no longer available. Refresh Today to check its current state.'
         : code === 'wrong_occurrence_type' ? 'This occurrence does not support this change. Refresh Today to check its current state.'
         : error instanceof ApiError && error.status === 401
-          ? 'Unable to verify your session. Retry, or return Home to sign out and sign in again.'
+          ? 'Unable to verify your session. Retry, or open Settings to sign out and sign in again.'
         : 'Unable to change this occurrence. Please try again.';
       this.operations.set(key, { ...operation, pending: false, error: message, refreshRequired: !definite || refresh, clearErrorOnRefresh: !definite });
       this.publish({ ...this.state, completions: this.completionStates() });

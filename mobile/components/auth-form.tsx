@@ -1,6 +1,7 @@
+import { Button, Link } from './ui';
 import { useRef, useState } from 'react';
-import { Button, Text } from 'react-native';
-import { Link } from 'expo-router';
+import { Text } from 'react-native';
+
 import { authRedirect } from '../lib/auth-links';
 import { supabase } from '../lib/supabase';
 import { Field, Form, Loading, Message, styles } from './form';

@@ -53,7 +53,7 @@ export function HabitFields({ draft, onChange, disabled, timezone, readOnlyType 
 
 const localStyles = StyleSheet.create({
   choices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  choice: { minHeight: 48, padding: 12, borderWidth: 1, borderColor: '#68778d', borderRadius: 8, backgroundColor: 'white' },
+  choice: { maxWidth: '100%', flexShrink: 1, minHeight: 48, padding: 12, borderWidth: 1, borderColor: '#68778d', borderRadius: 8, backgroundColor: 'white' },
   selected: { backgroundColor: '#e8f0fe', borderColor: '#172b4d' },
   disabled: { opacity: 0.6 },
 });

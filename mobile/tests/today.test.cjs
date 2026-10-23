@@ -101,6 +101,7 @@ async function screen(readToday, readProfile = async s => profile(s.user.id), in
     },
   };
   const modules = {
+    ...require('./native-ui-support.cjs'),
     'react/jsx-runtime': runtime,
     react: { useCallback: fn => fn, useState: initial => [store ??= initial()], useSyncExternalStore: (_subscribe, snapshot) => snapshot() },
     'expo-router': { useFocusEffect: callback => { focus = callback; } },
@@ -1341,6 +1342,7 @@ test('Home links to Today and its route is protected for ready accounts only', (
   Stack.Screen = 'Screen';
   Stack.Protected = 'Protected';
   const modules = {
+    ...require('./native-ui-support.cjs'),
     'react/jsx-runtime': runtime,
     'expo-router': { Link: 'Link', Stack },
     'react-native': { Button: 'Button', Text: 'Text' },

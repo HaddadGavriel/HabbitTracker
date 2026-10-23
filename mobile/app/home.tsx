@@ -1,9 +1,18 @@
-import { Link } from 'expo-router';
-import { Button, Text } from 'react-native';
+import { Link } from '../components/ui';
+import { Text } from 'react-native';
 import { Form, styles } from '../components/form';
 import { useSession } from '../lib/session';
 export default function Home() {
-  const { profile, session, store } = useSession();
+  const { profile } = useSession();
   if (!profile) return null;
-  return <Form><Text style={styles.title}>Welcome, {profile.display_name}</Text><Text>@{profile.username}</Text><Text>{session?.user.email}</Text><Text>Timezone: {profile.timezone}</Text><Link href="/settings" style={styles.message}>Settings</Link><Link href="/friends" style={styles.message}>Friends</Link><Link href="/shared-habits" style={styles.message}>Friends’ habits</Link><Link href="/pending-excuses" style={styles.message}>Pending excuse decisions</Link><Link href="/today" style={styles.message}>Today</Link><Link href="/my-habits" style={styles.message}>My habits</Link><Link href="/diagnostics" style={styles.message}>Infrastructure diagnostics</Link><Button title="Sign out" onPress={store.signOut} /></Form>;
+  return <Form><Text accessibilityRole="header" style={styles.title}>Habit Tracker</Text>
+    <Text style={styles.message}>{profile.display_name} · @{profile.username}</Text>
+    <Link href="/today">Today</Link>
+    <Link href="/my-habits">My habits</Link>
+    <Link href="/friends">Friends</Link>
+    <Link href="/shared-habits">Friends’ habits</Link>
+    <Link href="/pending-excuses">Pending decisions</Link>
+    <Link href="/settings">Settings</Link>
+    <Text style={styles.message}>An internet connection is needed to load current status and save changes. Changes are not queued offline. If a save cannot be confirmed, refresh before trying it again.</Text>
+  </Form>;
 }

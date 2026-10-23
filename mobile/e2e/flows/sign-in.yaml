@@ -1,0 +1,13 @@
+appId: com.haddadgavriel.habittracker
+---
+- tapOn:
+    id: field-email
+- inputText: ${EMAIL}
+- tapOn:
+    id: field-password
+- inputText: Smoke-only-123!
+- hideKeyboard
+- tapOn: Sign in
+- extendedWaitUntil:
+    visible: Open navigation menu
+    timeout: 20000

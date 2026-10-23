@@ -1,5 +1,6 @@
+import { Button } from './ui';
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { Button, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { Form, Message, styles } from './form';
 import { AccountDeletionStore } from '../lib/account-deletion-store';
 import { createAccountDeletionStore } from '../lib/account-deletion-runtime';
@@ -20,7 +21,7 @@ export function AccountDeletionGate({ children }: { children: ReactNode }) {
     {state.saved.length > 0 && <View><Text>Saved account deletions can still be checked.</Text>
       {state.saved.map((entry, index) => <Button key={entry.owner} title={`Check saved deletion ${index + 1}`} onPress={() => store.recover(entry.owner)} />)}
     </View>}
-  </> : <Form><Text style={styles.title}>Account deletion</Text>
+  </> : <Form standalone><Text style={styles.title}>Account deletion</Text>
     <Message text={state.message ?? 'Checking account deletion…'} />
     {state.phase !== 'complete' && <Button title="Check and retry deletion" disabled={state.phase === 'checking'} onPress={() => store.recover()} />}
     {state.canDismiss && <Button title="Continue to app" onPress={store.dismiss} />}

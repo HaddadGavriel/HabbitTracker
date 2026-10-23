@@ -1,5 +1,6 @@
+import { Button } from './ui';
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { Alert, Button, Text, View } from 'react-native';
+import { Alert, Text, View } from 'react-native';
 import type { SharedHabitResult } from '../lib/api';
 import { reminderEligible, reminderLabels, type ClockSample } from '../lib/reminder-rules';
 import { cooldownUntil, unresolved } from '../lib/reminder-service';

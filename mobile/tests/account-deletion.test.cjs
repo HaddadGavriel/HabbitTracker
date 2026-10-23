@@ -73,6 +73,7 @@ const nodes = tree => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof
 function settings() {
   const state = [], calls = []; let index = 0;
   const modules = {
+    ...require('./native-ui-support.cjs'),
     'react/jsx-runtime': { jsx, jsxs:jsx },
     react: { useState: initial => { const i=index++; state[i] ??= initial; return [state[i], value => { state[i]=value; }]; }, useRef: value => ({current:value}) },
     'react-native': { Button:'Button', Text:'Text' }, 'expo-router': { Link:'Link' },
@@ -109,7 +110,8 @@ test('deleted decision maker is accepted only with null identity', () => {
 });
 
 test('actual excuse view labels deleted friend and keeps the decision timestamp', () => {
-  const modules={'react/jsx-runtime':{jsx,jsxs:jsx},'react-native':{Text:'Text',View:'View'},'./form':{styles:{}}};
+  const modules={...require('./native-ui-support.cjs'),
+    'react/jsx-runtime':{jsx,jsxs:jsx},'react-native':{Text:'Text',View:'View'},'./form':{styles:{}}};
   const { ExcuseView }=compile('components/excuse-view.tsx',name=>modules[name]);
   const tree=nodes(ExcuseView({excuse:{status:'approved',explanation:'Preserved history',created_at:'created',decided_at:'original-time',decision_source:'deleted_friend',decided_by:null}}));
   const text=tree.filter(n=>n.type==='Text').map(n=>(Array.isArray(n.props.children)?n.props.children.join(''):n.props.children)).join(' ');

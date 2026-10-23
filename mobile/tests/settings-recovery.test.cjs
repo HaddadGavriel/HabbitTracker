@@ -135,7 +135,7 @@ function compileScreen(path, modules) {
   const exports = {};
   vm.runInNewContext(ts.transpileModule(readFileSync(`${__dirname}/../${path}`, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx:ts.JsxEmit.ReactJSX },
-  }).outputText, { exports, Error, require: p => { if (!(p in modules)) throw Error('Unexpected dependency: '+p); return modules[p]; } });
+  }).outputText, { exports, Error, process: { env: {} }, require: p => { if (!(p in modules)) throw Error('Unexpected dependency: '+p); return modules[p]; } });
   return exports;
 }
 const jsx = (type,props,key) => typeof type === 'function' ? type(props) : {type,props,key};
@@ -144,6 +144,7 @@ const text = tree => Array.isArray(tree) ? tree.map(text).join('') : typeof tree
 test('every recovery phase gates ordinary home/settings, even with a ready app session', () => {
   let phase='idle', status='ready'; const Stack = p => ({type:'Stack',props:p}); Stack.Screen='Screen'; Stack.Protected='Protected';
   const modules={
+    ...require('./native-ui-support.cjs'),
     'react/jsx-runtime':{jsx,jsxs:jsx},'expo-router':{Stack},'expo-notifications':{setNotificationHandler(){}},
     '../components/account-deletion-gate': { AccountDeletionGate: p => p.children, useAccountDeletion: () => ({ begin: async () => {} }) },
     '../components/notification-tap-gate': { NotificationTapGate: 'NotificationTapGate' },
@@ -172,6 +173,7 @@ test('Settings screen edits validated fields, explains policy, renders read-only
   const x=sessions(async()=>{throw new ApiError('taken',409,'username_taken');}); await x.store.start();
   let slots=[],index=0;
   const modules={
+    ...require('./native-ui-support.cjs'),
     'react/jsx-runtime':{jsx,jsxs:jsx},'react':{useState:initial=>{const i=index++; if (!(i in slots)) slots[i]=initial; return [slots[i],v=>{slots[i]=v;}];},useRef:initial=>{const i=index++;return slots[i]??=( {current:initial} );}},
     'react-native':{Text:'Text',Button:'Button'},'expo-router':{Link:'Link'},
     '../components/account-deletion-gate': { AccountDeletionGate: p => p.children, useAccountDeletion: () => ({ begin: async () => {} }) },

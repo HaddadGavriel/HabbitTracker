@@ -1,6 +1,7 @@
+import { Button, Link } from '../components/ui';
 import { useCallback, useState, useSyncExternalStore } from 'react';
-import { Link, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { ActivityIndicator, AppState, Button, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { ActivityIndicator, AppState, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Form, Message, styles } from '../components/form';
 import { grantHabitShare, listFriends, listHabitShares, readHabit, revokeHabitShare } from '../lib/api';
 import { SharingStore } from '../lib/sharing-store';
@@ -35,7 +36,7 @@ function Sharing({ id }: { id: string }) {
     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={store.refresh} />}>
     <Text accessibilityRole="header" style={styles.title}>Manage sharing</Text>
     <Link href="/my-habits" style={styles.message}>My habits</Link>
-    <Link href="/home" style={styles.message}>Home</Link>
+    <Link href="/home" style={styles.message}>Navigation menu</Link>
     <Text style={styles.message}>Habits are private by default. Accepted friendship alone does not grant permission to view this habit. Choose each friend explicitly.</Text>
     <Text style={styles.message}>Archiving keeps grants, but recipients cannot view the habit while archived. Restoring makes retained grants available again while the friendship still exists.</Text>
     <Text style={styles.message}>Removing a friendship deletes its grants. Becoming friends again does not restore them; sharing again requires your explicit choice.</Text>

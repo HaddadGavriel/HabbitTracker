@@ -1,4 +1,5 @@
-import { Button, Text } from 'react-native';
+import { Button } from '../components/ui';
+import { Text } from 'react-native';
 import { Form, Loading, Message, styles } from '../components/form';
 import { useAuthLink } from '../lib/auth-link-context';
 export default function AuthCallback() {

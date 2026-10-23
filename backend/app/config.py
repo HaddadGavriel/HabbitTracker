@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     supabase_url: str
     supabase_publishable_key: str
     supabase_secret_key: str
+    enable_diagnostics: bool = False
     expo_push_url: str = "https://exp.host/--/api/v2/push/send"
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])
 

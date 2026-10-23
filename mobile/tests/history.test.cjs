@@ -73,10 +73,11 @@ async function screen({ readHabitHistory = async () => history(), readHabitStrea
   };
   const navigations = [];
   const modules = {
+    ...require('./native-ui-support.cjs'),
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     react: { useCallback: fn => fn, useState: initial => [store ??= initial()], useSyncExternalStore: (_subscribe, snapshot) => snapshot() },
     'expo-router': { useLocalSearchParams: () => params, useFocusEffect: callback => { focus = callback; }, router: { dismissTo: path => navigations.push(path) } },
-    'react-native': { ActivityIndicator: 'ActivityIndicator', Button: 'Button', FlatList: 'FlatList',
+    'react-native': { AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) }, ActivityIndicator: 'ActivityIndicator', Button: 'Button', FlatList: 'FlatList',
       Text: 'Text', View: 'View', StyleSheet: { create: value => value } },
     '../components/form': { Form: 'Form', Message: props => jsx('Text', { children: props.text }), styles: {} },
     '../lib/api': { readHabitHistory, readHabitStreak },
@@ -588,6 +589,7 @@ test('history route is protected by the ready-profile guard and navigation is ke
   const runtime = { jsx: (type, props, key) => type === StackComponent ? { type: Stack, props, key } : jsx(type, props, key),
     jsxs: (type, props, key) => type === StackComponent ? { type: Stack, props, key } : jsx(type, props, key) };
   const modules = {
+    ...require('./native-ui-support.cjs'),
     'react/jsx-runtime': runtime,
     'expo-router': { Stack: StackComponent },
     'expo-notifications': { setNotificationHandler() {} },
