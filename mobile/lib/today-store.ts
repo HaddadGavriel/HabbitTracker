@@ -157,8 +157,8 @@ export class TodayStore {
       || !['pending', 'approved', 'rejected'].includes(result.status) || !Number.isFinite(Date.parse(result.created_at))
       || !Number.isFinite(Date.parse(occurrence.updated_at))
       || (result.status === 'pending' ? result.decision_source !== null || result.decided_at !== null || result.decided_by !== null
-        : !Number.isFinite(Date.parse(result.decided_at ?? '')) || !['automatic', 'friend'].includes(result.decision_source ?? '')
-          || (result.decision_source === 'automatic' ? result.status !== 'approved' || result.decided_by !== null : !result.decided_by))) {
+        : !Number.isFinite(Date.parse(result.decided_at ?? '')) || !['automatic', 'friend', 'deleted_friend'].includes(result.decision_source ?? '')
+          || (result.decision_source === 'automatic' ? result.status !== 'approved' || result.decided_by !== null : result.decision_source === 'deleted_friend' ? result.decided_by !== null : !result.decided_by))) {
       throw new ApiError('Unexpected excuse response', 200, 'invalid_response');
     }
   }

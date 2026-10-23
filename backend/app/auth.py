@@ -15,7 +15,7 @@ class AuthenticatedUser:
     email: str | None = None
 
 
-async def get_current_user(
+async def get_authenticated_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
     settings: Settings = Depends(get_settings),
 ) -> AuthenticatedUser:
@@ -30,3 +30,15 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Invalid or expired Supabase access token")
     payload = response.json()
     return AuthenticatedUser(id=payload["id"], email=payload.get("email"))
+
+
+async def get_current_user(user: AuthenticatedUser = Depends(get_authenticated_user),
+                           settings: Settings = Depends(get_settings)) -> AuthenticatedUser:
+    from .services.supabase import SupabaseDatabase
+    try:
+        pending = await SupabaseDatabase(settings).deletion_rpc('account_is_deleting', {'p_user': user.id})
+    except httpx.HTTPError:
+        raise HTTPException(503, detail={'code': 'account_status_unavailable', 'message': 'Unable to verify account status.'}) from None
+    if pending:
+        raise HTTPException(409, detail={'code': 'account_deletion_pending', 'message': 'Account deletion is pending. Recover using your saved receipt.'})
+    return user

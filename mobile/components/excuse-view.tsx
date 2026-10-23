@@ -16,7 +16,7 @@ export function ExcuseView({ excuse, occurrence }: { excuse: HistoryExcuse; occu
     <Text style={styles.label}>Excuse: {excuse.status}</Text>
     <Text style={styles.message}>{excuse.explanation}</Text>
     <Text style={styles.message}>Submitted: {excuse.created_at}</Text>
-    <Text style={styles.message}>Decision: {excuse.decision_source === 'automatic' ? 'Automatic' : excuse.decision_source === 'friend' ? 'Friend' : 'Awaiting an authorized friend'}</Text>
+    <Text style={styles.message}>Decision: {excuse.decision_source === 'deleted_friend' ? 'Deleted friend' : excuse.decision_source === 'automatic' ? 'Automatic' : excuse.decision_source === 'friend' ? 'Friend' : 'Awaiting an authorized friend'}</Text>
     {excuse.decided_by && <Text style={styles.message}>Decided by: {excuse.decided_by}</Text>}
     {excuse.decided_at && <Text style={styles.message}>Decided at: {excuse.decided_at}</Text>}
     {excuse.status === 'pending' && <Text style={styles.message}>Pending stays unresolved if no authorized friends remain. Archived habits must be restored before a friend can decide.</Text>}

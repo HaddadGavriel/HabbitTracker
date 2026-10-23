@@ -311,6 +311,7 @@ test('normal navigation reaches the shared list and both shared routes require a
   const modules = {
     'react/jsx-runtime': runtime, 'expo-router': { Link: 'Link', Stack }, 'react-native': native,
     'expo-notifications': { setNotificationHandler() {} },
+    '../components/account-deletion-gate': { AccountDeletionGate: p => p.children, useAccountDeletion: () => ({ begin: async () => {} }) },
     '../components/notification-tap-gate': { NotificationTapGate: 'NotificationTapGate' },
     '../lib/notification-runtime': { notificationService: { canPresent: () => false } }, '../components/form': form,
     '../lib/session-store': { routeAccess },

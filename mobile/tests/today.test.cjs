@@ -1345,6 +1345,7 @@ test('Home links to Today and its route is protected for ready accounts only', (
     'expo-router': { Link: 'Link', Stack },
     'react-native': { Button: 'Button', Text: 'Text' },
     'expo-notifications': { setNotificationHandler() {} },
+    '../components/account-deletion-gate': { AccountDeletionGate: p => p.children, useAccountDeletion: () => ({ begin: async () => {} }) },
     '../components/notification-tap-gate': { NotificationTapGate: 'NotificationTapGate' },
     '../lib/notification-runtime': { notificationService: { canPresent: () => false } },
     '../components/form': { Form: 'Form', styles: {} },

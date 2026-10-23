@@ -51,6 +51,7 @@ export class NotificationTaps {
   private seen = new Set<string>();
   private handled: Set<string> | null = null;
   private storage: Promise<void> = Promise.resolve();
+  private deleting = false;
   private message: string | null = null;
   private listeners = new Set<() => void>();
   constructor(private deps: Dependencies) {}
@@ -63,6 +64,7 @@ export class NotificationTaps {
     if (this.pending && ((this.pending.user && this.pending.user !== state.session?.user.id)
       || (this.session.status === 'ready' && state.status !== 'ready'))) this.pending = null;
     this.session = state;
+    if (state.status === 'ready') this.deleting = false;
     if (this.pending && !this.pending.user && state.session) this.pending.user = state.session.user.id;
     this.epoch++;
     this.publish(null);
@@ -71,6 +73,18 @@ export class NotificationTaps {
   setReady = (ready: boolean) => { if (this.ready !== ready) { this.ready = ready; this.epoch++; } this.pump(); };
   setForeground = (foreground: boolean) => { if (this.foreground !== foreground) { this.foreground = foreground; this.epoch++; } this.pump(); };
   stop = () => { this.pending = null; this.ready = false; this.epoch++; };
+  clearForAccountDeletion = async (current = () => true) => {
+    if (!current()) return;
+    this.deleting = true;
+    this.stop(); this.seen.clear(); this.publish(null);
+    const work = this.storage.then(async () => {
+      if (!current()) return;
+      this.handled = new Set();
+      await this.deps.saveHandled([]);
+    });
+    this.storage = work.catch(() => {});
+    await work;
+  };
   receive = (response: unknown, defaultAction: string): Promise<void> => {
     const tap = parseNotificationTap(response, defaultAction);
     return this.claim(tap);
@@ -84,6 +98,7 @@ export class NotificationTaps {
     return this.claim({ key: `local:${owner}:${value.receipt_id}`, target: { kind: 'today', owner } });
   };
   private claim(tap: Tap | null): Promise<void> {
+    if (this.deleting) return Promise.resolve();
     if (!tap || this.seen.has(tap.key)) return Promise.resolve();
     this.seen.add(tap.key);
     const pending: Pending = { tap, user: tap.target.kind === 'today' && tap.target.owner

@@ -60,6 +60,11 @@ class SupabaseDatabase:
             "Content-Type": "application/json",
         }
 
+    async def deletion_rpc(self, function: str, body: dict):
+        response = await self._rpc(function, body)
+        response.raise_for_status()
+        return response.json()
+
     async def register_device(self, user_id: str, token: str, platform: str, registration_id: str) -> datetime | None:
         response = await self._rpc("register_device_intent", {"p_user": user_id, "p_token": token, "p_platform": platform, "p_registration": registration_id})
         response.raise_for_status()

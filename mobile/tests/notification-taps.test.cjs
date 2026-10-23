@@ -204,3 +204,26 @@ test('offline local tap falls back safely without trusting the receipt as author
   await x.taps.receiveLocal(localMetadata()); await flush();
   assert.deepEqual(x.navigation, ['/home']); assert.match(x.taps.snapshot(), /no longer available/);
 });
+
+test('account deletion drains tap journal and prevents delayed taps from repopulating it', async () => {
+  const reading=deferred(), x=setup({readHabit:()=>reading.promise}); x.ready();
+  await x.receive(); await flush();
+  assert.equal(x.disk.keys.length,1);
+  x.taps.setSession(state('signed_out',null));
+  await x.taps.clearForAccountDeletion();
+  reading.resolve({id:habit,owner_id:'owner-a',archived_at:null}); await flush();
+  await x.receive(response(payload(),'new-native'));
+  assert.equal(x.disk.keys.length,0); assert.equal(x.navigation.length,0);
+});
+
+test('queued A deletion does not clear B tap dedup state after an account switch', async () => {
+  const saving = deferred(), x = setup(); let current = true;
+  x.ready(); const save = x.deps.saveHandled;
+  x.deps.saveHandled = async keys => { await saving.promise; await save(keys); };
+  const claim = x.receive(); await flush();
+  const cleanup = x.taps.clearForAccountDeletion(() => current);
+  current = false; x.taps.setSession(state('ready', 'owner-b')); x.taps.setReady(true);
+  saving.resolve(); await Promise.all([claim, cleanup]);
+  assert.deepEqual(x.disk.keys, [`reminder:${reminder}`]);
+  await x.receive(); assert.equal(x.navigation.length, 0);
+});

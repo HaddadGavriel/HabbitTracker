@@ -89,7 +89,7 @@ function HistoryEntry({ occurrence }: { occurrence: HistoryOccurrence }) {
       <Text style={styles.label}>Excuse: {excuse.status}</Text>
       <Text style={styles.message}>{excuse.explanation}</Text>
       <Text style={styles.message}>Submitted: {excuse.created_at}</Text>
-      {excuse.decision_source && <Text style={styles.message}>Decision: {excuse.decision_source === 'automatic' ? 'Automatic' : 'Friend'}</Text>}
+      {excuse.decision_source && <Text style={styles.message}>Decision: {excuse.decision_source === 'deleted_friend' ? 'Deleted friend' : excuse.decision_source === 'automatic' ? 'Automatic' : 'Friend'}</Text>}
       {excuse.decided_by && <Text style={styles.message}>Decided by: {excuse.decided_by}</Text>}
       {excuse.decided_at && <Text style={styles.message}>Decided at: {excuse.decided_at}</Text>}
     </View>}

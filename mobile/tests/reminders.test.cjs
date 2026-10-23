@@ -214,3 +214,29 @@ test('habit scope is independent and persistence excludes unexpected server prop
   await x.service.send(secondHabit, 'sender-a'); assert.equal(x.disk.size, 2);
   assert.ok([...x.disk.values()].every(value => !value.includes('never persist me')));
 });
+
+test('confirmed account deletion drains pending journal writes and fences late provider outcomes', async () => {
+  const provider=deferred(), x=setup({requestReminder:()=>provider.promise});
+  await x.load(); const sending=x.send(); await flush();
+  assert.equal(x.disk.size,1);
+  await x.service.clearForAccountDeletion('sender-a'); x.disk.clear();
+  provider.resolve(result()); await sending;
+  assert.equal(x.disk.size,0); assert.equal(Object.keys(x.service.snapshot()).length,0);
+  const saving=deferred(), y=setup({save:()=>saving.promise});
+  await y.load(); const work=y.send(); await flush();
+  let cleared=false; const cleanup=y.service.clearForAccountDeletion('sender-a').then(()=>{cleared=true;});
+  await flush(); assert.equal(cleared,false);
+  saving.resolve(); await Promise.all([cleanup,work]);
+  assert.equal(cleared,true); assert.equal(y.calls.filter(c=>c[0]==='post').length,0);
+});
+
+test('A cleanup fences A late response while preserving B current reminder operation and durable journal', async () => {
+  const a = deferred(), x = setup({ requestReminder: s => s.user.id === 'sender-a' ? a.promise : Promise.resolve(result()) });
+  await x.load(); const sending = x.send(); await flush();
+  x.service.setSession(session('sender-b')); await x.service.load(habit, 'sender-b'); await x.service.send(habit, 'sender-b');
+  const state = x.service.snapshot(), bJournal = x.disk.get(`sender-b/${habit}`);
+  await x.service.clearForAccountDeletion('sender-a'); x.disk.delete(`sender-a/${habit}`);
+  a.resolve(result()); await sending;
+  assert.equal(x.service.snapshot(), state); assert.equal(x.disk.get(`sender-b/${habit}`), bJournal);
+  assert.equal(x.disk.has(`sender-a/${habit}`), false);
+});

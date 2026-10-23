@@ -308,6 +308,7 @@ test('Home links to Friends and shared habits; friendship and sharing routes req
     'react/jsx-runtime': { jsx, jsxs: jsx },
     'expo-router': { Stack, Link: 'Link' },
     'expo-notifications': { setNotificationHandler() {} },
+    '../components/account-deletion-gate': { AccountDeletionGate: p => p.children, useAccountDeletion: () => ({ begin: async () => {} }) },
     '../components/notification-tap-gate': { NotificationTapGate: 'NotificationTapGate' },
     '../lib/notification-runtime': { notificationService: { canPresent: () => false } },
     'react-native': { Button: 'Button', Text: 'Text' },

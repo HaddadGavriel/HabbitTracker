@@ -146,6 +146,21 @@ function coordinator(options = {}) {
   return { service, native, nativeState, saved, calls, current, state };
 }
 
+test('deletion cancellation queued behind native work cannot cancel B reminders after ownership changes', async () => {
+  const x = coordinator(), native = deferred(); let current = true;
+  await x.service.setSession(x.state('ready'));
+  x.native.suppress = () => native.promise;
+  const suppress = x.service.changed(x.current, { habitId: 'habit' }); await flush();
+  const cleanup = x.service.beforeAccountDeletion(() => current);
+  current = false;
+  // The queued delete must neither cancel native state nor clear its preference.
+  x.saved.owner = bob;
+  const cancellations = x.calls.filter(([name]) => name === 'cancel').length;
+  native.resolve({ status: 'idle' }); await Promise.all([suppress, cleanup]);
+  assert.equal(x.saved.owner, bob);
+  assert.equal(x.calls.filter(([name]) => name === 'cancel').length, cancellations);
+});
+
 test('initial authenticated profile loading preserves same-account preference and waits for ready before reconciling', async () => {
   const x = coordinator();
   await x.service.setSession(x.state('loading'));
