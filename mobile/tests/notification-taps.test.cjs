@@ -215,3 +215,15 @@ test('account deletion drains tap journal and prevents delayed taps from repopul
   await x.receive(response(payload(),'new-native'));
   assert.equal(x.disk.keys.length,0); assert.equal(x.navigation.length,0);
 });
+
+test('queued A deletion does not clear B tap dedup state after an account switch', async () => {
+  const saving = deferred(), x = setup(); let current = true;
+  x.ready(); const save = x.deps.saveHandled;
+  x.deps.saveHandled = async keys => { await saving.promise; await save(keys); };
+  const claim = x.receive(); await flush();
+  const cleanup = x.taps.clearForAccountDeletion(() => current);
+  current = false; x.taps.setSession(state('ready', 'owner-b')); x.taps.setReady(true);
+  saving.resolve(); await Promise.all([claim, cleanup]);
+  assert.deepEqual(x.disk.keys, [`reminder:${reminder}`]);
+  await x.receive(); assert.equal(x.navigation.length, 0);
+});

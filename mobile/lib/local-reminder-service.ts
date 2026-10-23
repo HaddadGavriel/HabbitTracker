@@ -139,11 +139,13 @@ export class LocalReminderService {
       await this.refresh();
     } catch { if (epoch === this.epoch) this.failed(); }
   };
-  disable = async (): Promise<void> => {
+  disable = async (current = () => true): Promise<void> => {
+    if (!current()) return;
     const epoch = ++this.epoch; this.revision++; this.pending = false;
     this.publish({ enabled: false, status: 'off', message: 'Disabling habit reminders…' });
     try {
       await this.exclusive(async () => {
+        if (!current()) return;
         // No read is needed to revoke: cancel also covers a persisted native
         // owner after process death, even when preference storage cannot load.
         this.enabledOwner = null; this.loaded = true;
@@ -153,8 +155,9 @@ export class LocalReminderService {
     } catch { if (epoch === this.epoch) this.failed(); }
   };
   /** Call and confirm cleanup before a future account-deletion flow removes auth. */
-  beforeAccountDeletion = async (): Promise<void> => {
-    await this.disable();
+  beforeAccountDeletion = async (current = () => true): Promise<void> => {
+    await this.disable(current);
+    if (!current()) return;
     if (this.state.status === 'error') throw new Error('Retry local reminder cleanup before deleting the account.');
   };
   private async blocked(epoch: number) {

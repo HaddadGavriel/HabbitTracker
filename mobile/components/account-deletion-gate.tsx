@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { Button, Text } from 'react-native';
+import { Button, Text, View } from 'react-native';
 import { Form, Message, styles } from './form';
 import { AccountDeletionStore } from '../lib/account-deletion-store';
 import { createAccountDeletionStore } from '../lib/account-deletion-runtime';
@@ -12,16 +12,17 @@ export function useAccountDeletion() {
 }
 export function AccountDeletionGate({ children }: { children: ReactNode }) {
   const { store: session } = useSession();
-  const [store] = useState(() => createAccountDeletionStore(async () => {
-    await session.signOut();
-    if (session.snapshot().status !== 'signed_out') throw new Error('Local session cleanup failed');
-  }));
+  const [store] = useState(() => createAccountDeletionStore(session));
   const state = useSyncExternalStore(store.subscribe, store.snapshot);
-  useEffect(() => { void store.start(); }, [store]);
-  return <Context.Provider value={store}>{state.phase === 'idle' ? children :
-    <Form><Text style={styles.title}>Account deletion</Text>
-      <Message text={state.message ?? 'Checking account deletion…'} />
-      {state.phase !== 'complete' && <Button title="Check and retry deletion" disabled={state.phase === 'checking'} onPress={store.recover} />}
-      {(state.phase === 'not_found' || state.phase === 'complete') && <Button title={state.phase === 'complete' ? 'Continue to sign in' : 'Return to account'} onPress={store.dismiss} />}
-    </Form>}</Context.Provider>;
+  useEffect(() => { void store.start(); return store.stop; }, [store]);
+  return <Context.Provider value={store}>{state.phase === 'idle' ? <>
+    {children}
+    {state.saved.length > 0 && <View><Text>Saved account deletions can still be checked.</Text>
+      {state.saved.map((entry, index) => <Button key={entry.owner} title={`Check saved deletion ${index + 1}`} onPress={() => store.recover(entry.owner)} />)}
+    </View>}
+  </> : <Form><Text style={styles.title}>Account deletion</Text>
+    <Message text={state.message ?? 'Checking account deletion…'} />
+    {state.phase !== 'complete' && <Button title="Check and retry deletion" disabled={state.phase === 'checking'} onPress={() => store.recover()} />}
+    {state.canDismiss && <Button title="Continue to app" onPress={store.dismiss} />}
+  </Form>}</Context.Provider>;
 }

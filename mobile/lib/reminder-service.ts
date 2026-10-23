@@ -34,19 +34,19 @@ export class ReminderService {
   private epoch = 0;
   private state: Record<string, ReminderView> = {};
   private listeners = new Set<() => void>();
-  private deletionEpoch = 0;
-  private writes = new Set<Promise<void>>();
+  private deletedOwners = new Set<string>();
+  private writes = new Map<Promise<void>, string>();
   private async saveJournal(sender: string, habit: string, requests: ReminderRequest[]) {
     const work = this.deps.save(sender, habit, requests);
-    this.writes.add(work);
+    this.writes.set(work, sender);
     try { await work; } finally { this.writes.delete(work); }
   }
-  clearForAccountDeletion = async () => {
-    this.setSession(null);
-    this.deletionEpoch = ++this.epoch;
-    this.journals.clear(); this.loads.clear(); this.state = {};
-    this.listeners.forEach(listener => listener());
-    await Promise.allSettled([...this.writes]);
+  clearForAccountDeletion = async (owner: string) => {
+    this.deletedOwners.add(owner);
+    if (this.session?.user.id === owner) this.setSession(null);
+    for (const slot of this.journals.keys()) if (JSON.parse(slot)[0] === owner) this.journals.delete(slot);
+    for (const slot of this.loads.keys()) if (JSON.parse(slot)[0] === owner) this.loads.delete(slot);
+    await Promise.allSettled([...this.writes].filter(([, sender]) => sender === owner).map(([work]) => work));
   };
   private journals = new Map<string, ReminderRequest[]>();
   private loads = new Map<string, Promise<ReminderRequest[]>>();
@@ -77,7 +77,6 @@ export class ReminderService {
     try { return await work; } finally { this.loads.delete(slot); }
   }
   private async readJournal(sender: string, habit: string, slot: string): Promise<ReminderRequest[]> {
-    const epoch = this.epoch;
     const value = await this.deps.load(sender, habit);
     if (value !== null && (!Array.isArray(value) || value.some(row => !row || typeof row !== 'object'
       || typeof row.key !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(row.key)
@@ -88,11 +87,11 @@ export class ReminderService {
       || (!['unconfirmed', 'rejected', 'cooldown'].includes(row.status) && !row.result))
       || new Set(value.map(row => row.key)).size !== value.length)) throw new Error('Invalid reminder journal');
     const rows = (value ?? []) as ReminderRequest[];
-    if (epoch >= this.deletionEpoch) this.journals.set(slot, rows);
+    if (!this.deletedOwners.has(sender)) this.journals.set(slot, rows);
     return rows;
   }
   load = async (habit: string, sender: string, refreshedAccess = false) => {
-    if (this.session?.user.id !== sender || (this.state[habit]?.loaded && !refreshedAccess) || this.state[habit]?.busy) return;
+    if (this.deletedOwners.has(sender) || this.session?.user.id !== sender || (this.state[habit]?.loaded && !refreshedAccess) || this.state[habit]?.busy) return;
     const epoch = this.epoch;
     this.publish(habit, { ...empty(), busy: true });
     try {
@@ -147,7 +146,7 @@ export class ReminderService {
       }
       // Also write on a check: if a previous write failed ambiguously, the exact
       // same in-memory key must become durable before it can leave this process.
-      if (epoch < this.deletionEpoch) return;
+      if (this.deletedOwners.has(sender)) return;
       try { await this.saveJournal(sender, habit, requests); }
       catch { message = 'The request key could not be saved. Nothing was dispatched by this attempt. Retry saving and checking this same request.'; return; }
       if (!current() || !request) return;
@@ -175,7 +174,7 @@ export class ReminderService {
           message = 'The outcome could not be confirmed. Check the same saved request; do not replace its key.';
         }
       }
-      if (epoch < this.deletionEpoch) return;
+      if (this.deletedOwners.has(sender)) return;
       requests = requests.map(row => row.key === request!.key ? updated : row);
       this.journals.set(slot, requests);
       try { await this.saveJournal(sender, habit, requests); }

@@ -245,9 +245,26 @@ test('an unreadable journal warns after local signout instead of assuming no rem
 
 test('confirmed deletion forgets registration journal despite unavailable remote cancellation, and reports local storage failure', async () => {
   const x=await enabled({unregister:async()=>{throw Error('Auth account removed');}});
-  await x.service.forgetDeletedAccount();
+  await x.service.forgetDeletedAccount('a');
   assert.equal(x.journal().registrations.length,0); assert.equal(x.journal().enabledUser,null);
   assert.equal(x.service.canPresent(),false);
   x.deps.save=async()=>{throw Error('storage');};
-  await assert.rejects(x.service.forgetDeletedAccount(),/clear notification journal/);
+  await assert.rejects(x.service.forgetDeletedAccount('a'),/clear notification journal/);
+});
+
+test('deletion removes only the confirmed owner registrations, preserving another account opt-in and cleanup IDs', async () => {
+  const saved = { enabledUser: 'b', registrations: [{ userId: 'a', registrationId: 'old-a' }, { userId: 'b', registrationId: 'keep-b' }] };
+  const x = setup({}, saved);
+  await x.service.forgetDeletedAccount('a');
+  assert.deepEqual(x.journal(), { enabledUser: 'b', registrations: [{ userId: 'b', registrationId: 'keep-b' }] });
+  assert.equal(count(x, 'clear'), 0); assert.equal(count(x, 'unregister'), 0);
+});
+
+test('queued deletion cleanup rechecks account ownership before touching the registration journal', async () => {
+  const load = deferred(), saved = { enabledUser: 'b', registrations: [{ userId: 'b', registrationId: 'keep-b' }] };
+  const x = setup({ load: () => load.promise }, saved);
+  let current = true;
+  const work = x.service.forgetDeletedAccount('a', () => current); await flush();
+  current = false; load.resolve(saved); await work;
+  assert.deepEqual(x.journal(), saved); assert.equal(count(x, 'save'), 0); assert.equal(count(x, 'clear'), 0);
 });

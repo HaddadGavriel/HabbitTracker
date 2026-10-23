@@ -103,15 +103,20 @@ export class NotificationService {
     });
   };
   /** Only after the server confirms pending/complete deletion and revokes writes. */
-  forgetDeletedAccount = async (): Promise<void> => {
-    await this.setSession(null);
-    let failure = false;
+  forgetDeletedAccount = async (owner: string, current = () => true): Promise<void> => {
+    if (!current()) return;
+    if (this.session?.user.id === owner) await this.setSession(null);
+    let saved = false;
     await this.run(async () => {
-      this.journal = { enabledUser: null, registrations: [] };
-      try { await this.save(); } catch { failure = true; }
-      this.publish({ cleanupPending: false });
+      if (!current()) return;
+      this.journal = {
+        enabledUser: this.journal.enabledUser === owner ? null : this.journal.enabledUser,
+        registrations: this.journal.registrations.filter(entry => entry.userId !== owner),
+      };
+      await this.save(); saved = true;
+      this.publish({ cleanupPending: this.journal.registrations.some(entry => entry.registrationId !== this.confirmed?.registrationId) });
     });
-    if (failure || !this.loaded) throw new Error('Unable to clear notification journal');
+    if (current() && !saved) throw new Error('Unable to clear notification journal');
   };
   refresh = (renew = false): Promise<void> => {
     const epoch = this.epoch;

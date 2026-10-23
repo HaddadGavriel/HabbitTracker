@@ -73,10 +73,12 @@ export class NotificationTaps {
   setReady = (ready: boolean) => { if (this.ready !== ready) { this.ready = ready; this.epoch++; } this.pump(); };
   setForeground = (foreground: boolean) => { if (this.foreground !== foreground) { this.foreground = foreground; this.epoch++; } this.pump(); };
   stop = () => { this.pending = null; this.ready = false; this.epoch++; };
-  clearForAccountDeletion = async () => {
+  clearForAccountDeletion = async (current = () => true) => {
+    if (!current()) return;
     this.deleting = true;
     this.stop(); this.seen.clear(); this.publish(null);
     const work = this.storage.then(async () => {
+      if (!current()) return;
       this.handled = new Set();
       await this.deps.saveHandled([]);
     });

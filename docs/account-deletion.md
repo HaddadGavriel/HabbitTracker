@@ -104,8 +104,11 @@ to an already committed infrastructure push snapshot.
 ## Durable workflow and result recovery
 
 1. Before sending a deletion request, mobile persists a cryptographically random
-   32-byte receipt and the local expected account identity. Storage failure sends
-   nothing. Confirmation and password are not persisted.
+   32-byte receipt and the local expected account identity. The device journal
+   holds one independent receipt per account, with serialized writes so concurrent
+   account responses cannot overwrite each other's recovery. Existing single
+   receipts are read without loss and upgraded on the next write. Storage failure
+   sends nothing. Confirmation and password are not persisted.
 2. `POST /account/deletion` freshly reauthenticates, then calls the service-only
    `begin_account_deletion(validated_user, SHA256(receipt))`. One transaction
    inserts `pending`, anonymizes deciding identities, removes private application
@@ -123,20 +126,32 @@ to an already committed infrastructure push snapshot.
    Protect receipts like narrowly scoped credentials: TLS, no URL/query parameters,
    body logs or analytics; retain normal edge abuse controls.
 5. A confirmed `pending` or `complete` response clears local app/session data and
-   cancels native/scheduled/presented notifications. Pending is displayed as pending,
-   not deleted. An ambiguous start/recovery response keeps the gate and receipt.
+   cancels native/scheduled/presented notifications when that account still owns
+   the device, or Auth has definitively restored a signed-out session. If B is
+   active when A's response arrives, A's receipt remains saved and device cleanup
+   is deferred until signed out. Recovery never signs out B or clears B's active
+   data/notification state. Account changes also fence cleanup continuations and
+   queued service work. Pending is displayed as pending, not deleted. An ambiguous
+   response blocks the matching account, while another account can continue.
    A `not_found` response permits returning to Settings with the same receipt;
    it does not clear it, because a delayed original request might still commit.
-   An interrupted client loads the receipt at startup before rendering account
-   routes and retries recovery. It never needs the password again for recovery.
+   An interrupted client loads all receipts at startup and retries recovery after
+   Auth restores. The matching account's recovery is shown in the gate; previous
+   accounts remain accessible through **Check saved deletion** without blocking
+   the current account. Recovery for another account can always be dismissed.
+   Recovery never requires the password again. Retained A receipts do not prevent
+   B starting its own confirmed, freshly authenticated deletion.
 6. Mobile removes its receipt only after `complete` **and** successful local
    cleanup. Failed local cleanup retains the receipt for retry. Only then does
    it display **Account deleted**. Local cleanup fences late operation responses,
-   clears in-memory/durable reminder requests and registration journals, disables
+   clears that owner's in-memory/durable reminder requests and registration IDs, disables
    the native recurrence engine, clears notification taps/badges, and uses local
    Supabase sign-out to erase session tokens. Account switches are checked before
    dispatch and cleanup; an unexpected account cannot be silently deleted or
-   signed out by this workflow.
+   signed out by this workflow. Completed ownership is released only after the
+   updated journal is durably saved. A failed cleanup or removal keeps the receipt
+   retryable across process restarts. Signing in again with another account does
+   not reuse a completed account's receipt or runtime ownership.
 
 The normal auth dependency returns `409 account_deletion_pending` for the ledger
 identity, including completed tombstones. Ordinary reads/mutations cannot treat
@@ -187,13 +202,21 @@ Deletion tests exercise actual SQL/roles/FKs/trigger guards, exact preserved
 history/streaks, pending fences and both transaction orders for decisions, sharing,
 registration and reservations. Auth tests use mocked HTTP/adapter failures; mobile
 tests execute confirmation controls, lost-response recovery, cleanup failures and
-notification/session cleanup with native dependencies mocked. No live Auth
+notification/session cleanup with native dependencies mocked. Lifecycle regression
+tests use the real runtime, receipt store, gate and SessionStore across account
+changes, legacy-journal upgrades, restarts, delayed begin/recovery responses,
+overlapping requests and durable cleanup failures. No live Auth
 accounts, shared databases or device notification services are used by these tests.
 
-Verified locally for this change (2026-10-22): **1,697 backend tests passed**
+Initial implementation verified locally (2026-10-22): **1,697 backend tests passed**
 against disposable PostgreSQL 16; **681 mobile tests passed**; TypeScript
 `tsc --noEmit` passed. The final migration inventory was also applied from an
 empty second disposable database and all **30 focused deletion tests passed**.
 The backend emits an existing Starlette/AnyIO deprecation warning. Auth HTTP and
 native/mobile dependencies were mocked; no live Auth or physical-device deletion
 was tested. No shared migrations, deployment, merge, or live-user deletions ran.
+
+Recovery lifecycle fixes verified locally (2026-10-23): **695 mobile tests passed**
+and TypeScript `tsc --noEmit` passed. Backend code and migrations are unchanged
+by this correction. The regressions cover all three reported account-switch
+failures, restart, delayed responses, queued cleanup and preserved B state.
