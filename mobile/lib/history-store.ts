@@ -27,7 +27,7 @@ const emptyState = (): HistoryState => ({
 
 function errorMessage(error: unknown, subject: string): string {
   if (error instanceof ApiError) {
-    if (error.status === 401) return 'Unable to verify your session. Retry, or return Home to sign out and sign in again.';
+    if (error.status === 401) return 'Unable to verify your session. Retry, or open Settings to sign out and sign in again.';
     if (error.code === 'habit_not_found') return 'This habit was not found or is no longer available to your account.';
     if (error.code === 'request_timeout') return `Loading ${subject} timed out. Please retry.`;
     if (error.code === 'network_error') return `Unable to load ${subject}. Check your connection and retry.`;

@@ -23,7 +23,8 @@ const native = { ActivityIndicator: 'ActivityIndicator', Button: 'Button', Refre
   ScrollView: 'ScrollView', Text: 'Text', View: 'View', StyleSheet: { create: value => value } };
 const form = { styles: {} };
 const view = compile('components/excuse-view.tsx', name => ({
-  'react/jsx-runtime': runtime, 'react-native': native, './form': form,
+  ...require('./native-ui-support.cjs'),
+    'react/jsx-runtime': runtime, 'react-native': native, './form': form,
 })[name]);
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const pending = () => ({ id: 'excuse-1', occurrence_id: 'occurrence-1', habit_id: 'habit-1', owner_id: 'owner',
@@ -68,6 +69,7 @@ async function screen(overrides = {}) {
     },
   };
   const dependencies = {
+    ...require('./native-ui-support.cjs'),
     'react/jsx-runtime': runtime,
     react: { useCallback: fn => fn, useState: initial => [store ??= initial()], useSyncExternalStore: (_subscribe, snapshot) => snapshot() },
     'expo-router': { Link: 'Link', useFocusEffect: callback => { focus = callback; } },

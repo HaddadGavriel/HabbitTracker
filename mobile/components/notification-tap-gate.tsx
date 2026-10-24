@@ -1,6 +1,7 @@
+import { Button } from './ui';
 import { useEffect, useSyncExternalStore } from 'react';
 import { useRootNavigationState } from 'expo-router';
-import { Button, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { notificationTaps } from '../lib/notification-tap-runtime';
 import { styles } from './form';
 export function NotificationTapGate({ ready }: { ready: boolean }) {

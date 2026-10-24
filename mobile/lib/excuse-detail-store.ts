@@ -27,7 +27,7 @@ export function validateExcuse(excuse: ExcuseResult, occurrenceId?: string) {
 
 export function excuseReadError(error: unknown): string {
   if (error instanceof ApiError) {
-    if (error.status === 401) return 'Unable to verify your session. Retry, or return Home to sign out and sign in again.';
+    if (error.status === 401) return 'Unable to verify your session. Retry, or open Settings to sign out and sign in again.';
     if (error.code === 'profile_not_found') return 'Your profile is no longer available. Return Home to check your account.';
     if (error.status === 403 || error.status === 404) return 'This excuse is unavailable. It may not exist, sharing or friendship may have ended, or the habit may be archived.';
     if (error.code === 'request_timeout') return 'Loading excuses timed out. Retry to check current access and decisions.';

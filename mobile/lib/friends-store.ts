@@ -29,8 +29,8 @@ const emptyState = (): FriendsState => ({
   query: '', searchLoading: false, searchComplete: false, searchResult: null, searchError: null,
   pendingAction: null, actionError: null, notice: null, refreshRequired: false, removeConfirmation: null,
 });
-const sessionMessage = 'Unable to verify your session. Retry, or return Home to sign out and sign in again.';
-const profileMessage = 'Your profile is unavailable. Return Home to sign out and sign in again to complete onboarding.';
+const sessionMessage = 'Unable to verify your session. Retry, or open Settings to sign out and sign in again.';
+const profileMessage = 'Your profile is unavailable. Open Settings to sign out and sign in again to complete onboarding.';
 function readError(error: unknown, search = false) {
   if (error instanceof ApiError) {
     if (error.status === 401) return sessionMessage;

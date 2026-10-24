@@ -1,6 +1,7 @@
+import { Button } from '../components/ui';
 import { useCallback, useState, useSyncExternalStore } from 'react';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { ActivityIndicator, Button, FlatList, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, FlatList, StyleSheet, Text, View } from 'react-native';
 import { Form, Message, styles } from '../components/form';
 import { readHabitHistory, readHabitStreak, type HistoryOccurrence, type OccurrenceState } from '../lib/api';
 import { HistoryStore } from '../lib/history-store';
@@ -26,7 +27,15 @@ function History({ id }: { id: string }) {
   const [store] = useState(() => new HistoryStore(sessions, { readHabitHistory, readHabitStreak }, id));
   const { occurrences, nextCursor, hasLoaded, loading, refreshing, error, loadingMore,
     pageError, streak, streakLoading, streakError } = useSyncExternalStore(store.subscribe, store.snapshot);
-  useFocusEffect(useCallback(() => { store.start(); return () => store.stop(); }, [store]));
+  useFocusEffect(useCallback(() => {
+    store.start();
+    let previous = AppState.currentState;
+    const subscription = AppState.addEventListener('change', next => {
+      if (next === 'active' && previous !== 'active') void store.refreshServerState();
+      previous = next;
+    });
+    return () => { subscription.remove(); store.stop(); };
+  }, [store]));
 
   return <FlatList
     style={localStyles.screen}

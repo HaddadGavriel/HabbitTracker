@@ -1,5 +1,6 @@
+import { Button } from '../components/ui';
 import { useRef, useState } from 'react';
-import { Button, Text } from 'react-native';
+import { Text } from 'react-native';
 import { ApiError } from '../lib/api';
 import { profileInput } from '../lib/profile-input';
 import { useSession } from '../lib/session';

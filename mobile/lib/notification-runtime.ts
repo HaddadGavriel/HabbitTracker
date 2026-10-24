@@ -27,7 +27,7 @@ export async function prepareNotificationChannels() {
     sound: 'default', lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
   });
   await Notifications.setNotificationChannelAsync(INFRASTRUCTURE_CHANNEL, {
-    name: 'Infrastructure tests', importance: Notifications.AndroidImportance.DEFAULT,
+    name: 'Diagnostics', importance: Notifications.AndroidImportance.DEFAULT,
     sound: 'default', lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
   });
 }

@@ -1,0 +1,25 @@
+appId: com.haddadgavriel.habittracker
+---
+- runFlow:
+    file: menu.yaml
+    env:
+      DESTINATION: My habits
+- tapOn: Create habit
+- tapOn:
+    id: field-name
+- inputText: ${HABIT}
+- hideKeyboard
+- scrollUntilVisible:
+    element: 'Reminder times \(HH:MM, separated by commas\)'
+- tapOn:
+    id: field-reminder-times-hh-mm-separated-by-commas
+- inputText: 08:00, 21:30
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: submit-habit
+- tapOn:
+    id: submit-habit
+- extendedWaitUntil:
+    visible: 'Edit ${HABIT}'
+    timeout: 20000

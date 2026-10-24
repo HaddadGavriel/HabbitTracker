@@ -4,3 +4,5 @@ node_modules/
 google-services.json
 /android/
 /ios/
+/e2e/results.xml
+/e2e/artifacts/

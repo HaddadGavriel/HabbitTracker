@@ -1,6 +1,7 @@
+import { Button } from '../components/ui';
 import { useCallback, useState, useSyncExternalStore } from 'react';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { Button, Keyboard, Text } from 'react-native';
+import { Keyboard, Text } from 'react-native';
 import { Form, Loading, Message, styles } from '../components/form';
 import { HabitFields } from '../components/habit-fields';
 import { archiveHabit, readHabit, updateHabit } from '../lib/api';

@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from app.auth import AuthenticatedUser, get_current_user
 from app.dependencies import get_database, get_push_service
 from app.main import app
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.services.supabase import SupabaseDatabase
 
 
@@ -53,6 +53,7 @@ def test_protected_endpoints_reject_unauthenticated_requests():
 
 
 def test_infrastructure_orchestration_and_validation():
+    app.dependency_overrides[get_settings] = lambda: Settings(enable_diagnostics=True)
     database = FakeDatabase()
     app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(id="user-123")
     app.dependency_overrides[get_database] = lambda: database
@@ -67,5 +68,31 @@ def test_infrastructure_orchestration_and_validation():
         assert database.user_id == "user-123"
         assert database.marked
         assert client.post("/infrastructure-test", json={"request_id": "bad id!", "client_started_at": "not-a-date"}).status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_diagnostics_disabled_by_default_without_database_or_push():
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(id="user-123")
+    try:
+        response = TestClient(app).post("/infrastructure-test", json={"request_id": "request-123", "client_started_at": datetime.now(timezone.utc).isoformat()})
+        assert response.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_diagnostic_push_failure_does_not_expose_credentials():
+    class BrokenPush:
+        async def send(self, *args):
+            raise RuntimeError("sb_secret_do_not_expose ExponentPushToken[private]")
+    app.dependency_overrides[get_settings] = lambda: Settings(enable_diagnostics=True)
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(id="user-123")
+    app.dependency_overrides[get_database] = lambda: FakeDatabase()
+    app.dependency_overrides[get_push_service] = lambda: BrokenPush()
+    try:
+        response = TestClient(app).post("/infrastructure-test", json={"request_id": "request-123", "client_started_at": datetime.now(timezone.utc).isoformat()})
+        assert response.status_code == 502
+        assert response.json()["detail"] == "Diagnostic push request failed"
+        assert "sb_secret" not in response.text and "private" not in response.text
     finally:
         app.dependency_overrides.clear()

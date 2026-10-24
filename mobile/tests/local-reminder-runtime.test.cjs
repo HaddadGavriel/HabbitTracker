@@ -102,7 +102,8 @@ test('Settings local controls expose permission, failure, last sync and actionab
     refresh: async () => calls.push('refresh'), disable: async () => calls.push('disable') };
   const jsx = (type, props) => typeof type === 'function' ? type(props) : { type, props };
   const controls = compile('components/local-reminder-controls.tsx', name => ({
-    react: { useSyncExternalStore: (_, snapshot) => snapshot() }, 'react/jsx-runtime': { jsx, jsxs: jsx },
+    react: { useSyncExternalStore: (_, snapshot) => snapshot() }, ...require('./native-ui-support.cjs'),
+    'react/jsx-runtime': { jsx, jsxs: jsx },
     'react-native': { Text: 'Text', View: 'View', Button: 'Button' },
     '../lib/local-reminder-runtime': { localReminderService: service },
   })[name]);
@@ -257,6 +258,7 @@ test('SessionProvider fences remote sign-out immediately while local cleanup is 
   const modules = {
     react: { createContext: () => ({ Provider: 'Provider' }), useContext() {}, useEffect() {},
       useState: factory => [factory(), () => {}], useSyncExternalStore() {} },
+    ...require('./native-ui-support.cjs'),
     'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': { View: 'View' },
     './api': {}, './supabase': { supabase: { auth: {} } },
     './session-store': { SessionStore: class { constructor(_auth, _api, notifications) { lifecycle = notifications; } } },

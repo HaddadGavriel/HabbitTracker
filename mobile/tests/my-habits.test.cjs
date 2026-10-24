@@ -48,10 +48,11 @@ async function screen(listHabits, restoreHabit = async () => habit()) {
   const sessions = { snapshot: () => current, subscribe: callback => { listeners.add(callback); return () => listeners.delete(callback); } };
   const jsx = (type, props) => typeof type === 'function' ? type(props) : { type, props };
   const modules = {
+    ...require('./native-ui-support.cjs'),
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     react: { useCallback: fn => fn, useState: initial => [store ??= initial()], useSyncExternalStore: (_subscribe, snapshot) => snapshot() },
     'expo-router': { Link: 'Link', useFocusEffect: callback => { focus = callback; } },
-    'react-native': { ActivityIndicator: 'ActivityIndicator', Button: 'Button', FlatList: 'FlatList',
+    'react-native': { AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) }, ActivityIndicator: 'ActivityIndicator', Button: 'Button', FlatList: 'FlatList',
       Pressable: 'Pressable', Text: 'Text', View: 'View', StyleSheet: { create: value => value } },
     '../components/form': { styles: {} },
     '../lib/api': { listHabits, restoreHabit },

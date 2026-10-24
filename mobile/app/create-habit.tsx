@@ -1,6 +1,7 @@
+import { Button } from '../components/ui';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { router } from 'expo-router';
-import { Button, Keyboard, Text } from 'react-native';
+import { Keyboard, Text } from 'react-native';
 import { Form, Loading, Message, styles } from '../components/form';
 import { HabitFields } from '../components/habit-fields';
 import { createHabit } from '../lib/api';
@@ -25,6 +26,6 @@ export default function CreateHabit() {
       <Button title="Check My habits" disabled={disabled} onPress={() => router.push('/my-habits')} />
       <Text style={styles.message}>Use Back to return to this form with your entered values.</Text>
     </>}
-    <Button title={busy ? 'Saving…' : ambiguous ? 'Submit again' : 'Create habit'} disabled={disabled} onPress={submit} />
+    <Button testID="submit-habit" title={busy ? 'Saving…' : ambiguous ? 'Submit again' : 'Create habit'} disabled={disabled} onPress={submit} />
   </Form>;
 }

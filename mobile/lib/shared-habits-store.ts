@@ -24,7 +24,7 @@ const emptyState = (): SharedHabitsState => ({
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
-    if (error.status === 401) return 'Unable to verify your session. Retry, or return Home to sign out and sign in again.';
+    if (error.status === 401) return 'Unable to verify your session. Retry, or open Settings to sign out and sign in again.';
     if (error.code === 'profile_not_found') return 'Your profile is no longer available. Return Home to check your account.';
     if (error.status === 403 || error.status === 404 || error.code === 'habit_not_found') {
       return 'This shared habit is no longer available. Sharing or friendship may have ended, or the owner may have archived the habit.';

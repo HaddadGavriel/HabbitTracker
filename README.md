@@ -1,6 +1,12 @@
-# Habit Tracker — profiles, friendships, and habit tracking
+# Habit Tracker — Android MVP release candidate
 
-This repository contains authenticated profiles, exact username lookup, friendships, private habit tracking, selective habit sharing, occurrence excuses with friend decisions, owner occurrence history, current streaks, friend-triggered push reminders, and integrated Android local habit reminders. It also retains the Android infrastructure proof. Backend contracts and PowerShell walkthroughs are in [`docs/friendships.md`](docs/friendships.md), [`docs/habits.md`](docs/habits.md), [`docs/occurrences.md`](docs/occurrences.md), [`docs/sharing.md`](docs/sharing.md), [`docs/excuses.md`](docs/excuses.md), [`docs/history.md`](docs/history.md), and [`docs/reminders.md`](docs/reminders.md).
+This repository contains authenticated profiles, exact username lookup, friendships, private habit tracking, selective habit sharing, occurrence excuses with friend decisions, owner occurrence history, current streaks, friend-triggered push reminders, and integrated Android local habit reminders. Settings includes profile/timezone updates, notification controls, sign-out and recoverable permanent account deletion. Support diagnostics are optional and disabled by default. Backend contracts and PowerShell walkthroughs are in [`docs/friendships.md`](docs/friendships.md), [`docs/habits.md`](docs/habits.md), [`docs/occurrences.md`](docs/occurrences.md), [`docs/sharing.md`](docs/sharing.md), [`docs/excuses.md`](docs/excuses.md), [`docs/history.md`](docs/history.md), and [`docs/reminders.md`](docs/reminders.md).
+
+The app opens on **Today**. **Menu** consistently reaches **My habits**, **Friends**,
+**Friends’ habits**, **Pending decisions**, and **Settings**. This is a release
+candidate, not a claim of production/device verification. Start with the
+[release runbook](docs/android-release-runbook.md), [requirements checklist](docs/android-release-checklist.md)
+and [actual validation evidence](docs/android-release-validation.md).
 
 ## Architecture
 
@@ -11,7 +17,7 @@ Expo/React Native Android app
   └─ Bearer access token → FastAPI on Render
        ├─ validates token with Supabase Auth /user
        ├─ secret-key REST calls → Supabase PostgreSQL
-       └─ Expo Push API → FCM → same Android device
+       └─ Expo Push API → FCM → registered owner Android device
 ```
 
 The secret key exists only on the backend. PostgreSQL tables have RLS enabled and intentionally grant no direct client access. The app receives only publishable values: Supabase URL/publishable key, API URL, and EAS project ID.
@@ -28,7 +34,7 @@ The secret key exists only on the backend. PostgreSQL tables have RLS enabled an
 
 ## Required tools and accounts
 
-Install Git, Python 3.12, Node.js 22.13 or newer, npm, [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started), and EAS CLI (`npm install --global eas-cli`). You need free/paid accounts as applicable for Supabase, Render, Expo, and Firebase, plus a physical Android phone. Expo Go is not the artifact used for this proof; build an APK with EAS.
+Install Git, Python 3.12, Node.js 22.13 or newer, npm, [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started), and EAS CLI (`npm install --global eas-cli`). You need free/paid accounts as applicable for Supabase, Render, Expo, and Firebase, plus a physical Android phone. Use an installed native APK for local scheduling and notifications; Expo Go is not the release artifact.
 
 ## Environment variables
 
@@ -41,7 +47,7 @@ Copy `mobile/.env.example`. These are compiled into the app and **must not be se
 | `EXPO_PUBLIC_SUPABASE_URL` | Supabase **Project Settings → API → Project URL** |
 | `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Modern `sb_publishable_...` key from Supabase **Settings → API Keys** |
 | `EXPO_PUBLIC_API_URL` | Deployed HTTPS Render URL, e.g. `https://...onrender.com` |
-| `EXPO_PUBLIC_EAS_PROJECT_ID` | UUID printed by `eas init` |
+| `EXPO_PUBLIC_EAS_PROJECT_ID` | Existing project UUID `4f31560d-6323-41f7-ae0a-f792a4814c98`; preserve project identity |
 
 For local Expo commands these values can live in the gitignored `mobile/.env`. EAS cloud builds do **not** depend on that local file: the same values must be configured in the EAS `preview` environment as described below.
 
@@ -55,14 +61,14 @@ Copy `backend/.env.example`:
 | `SUPABASE_PUBLISHABLE_KEY` | Modern `sb_publishable_...` key, sent as `apikey` when validating the user's JWT |
 | `SUPABASE_SECRET_KEY` | Modern `sb_secret_...` key used as the database REST `apikey`; never put it in mobile code or an `Authorization` header |
 | `EXPO_PUSH_URL` | Keep default `https://exp.host/--/api/v2/push/send` |
-| `CORS_ORIGINS` | JSON list. `['*']` is acceptable for native-only proof; use JSON double quotes, e.g. `["https://admin.example.com"]` |
+| `CORS_ORIGINS` | JSON list. `['*']` is acceptable for native app; use JSON double quotes, e.g. `["https://admin.example.com"]` |
 
 No database password or Firebase private credential belongs in the mobile `.env`.
 
 ## Supabase setup
 
 1. Create a project at Supabase. In **Settings → API Keys**, create/copy a modern publishable (`sb_publishable_...`) key and a modern secret (`sb_secret_...`) key. The deprecated JWT-shaped `anon` and `service_role` keys are not used.
-2. In **Authentication → Providers → Email**, enable Email. For a fast test either disable **Confirm email** or keep it enabled and click the verification link before signing in.
+2. In **Authentication → Providers → Email**, enable Email. Keep **Confirm email** enabled for release acceptance. Configure the callback allowlist and templates in the [runbook](docs/android-release-runbook.md#supabase-auth-callbacks), then verify on an installed APK.
 3. During a separately authorized release, from the repository root link and apply the committed migrations:
 
    ```bash
@@ -73,7 +79,7 @@ No database password or Firebase private credential belongs in the mobile `.env`
 
    The CLI applies unapplied migrations in timestamp order, through the latest committed migration, including the local-reminder plan and eligibility migrations, before deploying the matching backend. The friend-reminders migration retains global token uniqueness; the cleanup migration adds owner-scoped registration identities and cancellation fences. Follow the [notification release and recovery guide](docs/mobile-notifications.md). If CLI access is unavailable, run each unapplied migration in filename order in **Supabase Dashboard → SQL Editor → New query → Run**; do not edit a migration that was already applied. Disposable PostgreSQL test setup is documented in [`docs/friendships.md`](docs/friendships.md). Implementation and tests do not apply shared database migrations or deploy the service.
 
-The mobile app now provides email/password authentication, profile onboarding, a minimal identity home, **Friends** with exact username lookup, requests and friendship removal, **Today** with server-provided dates, occurrence states, eligible binary complete/undo actions and absolute target progress, **My habits** with Active/Archived filters, creation/edit forms and archive/restore actions, and infrastructure diagnostics. Owned active and archived habits also have **Manage sharing**, read-only occurrence history and server-calculated current streaks. **Friends’ habits** provides shared lists/details with each owner’s date/timezone, stored occurrence snapshots and current/provisional streaks. Owners can submit an eligible **Today** excuse and inspect it from Today/history; **Pending excuse decisions** lets currently authorized friends confirm approval or rejection, including for older dates. Shared detail links to accessible excuse details. See the [Android authentication walkthrough](docs/mobile-auth-walkthrough.md), [two-user Friends walkthrough](docs/mobile-friends-walkthrough.md), [My habits walkthrough](docs/mobile-habits-walkthrough.md), [habit creation walkthrough](docs/mobile-create-habit-walkthrough.md), [habit editing walkthrough](docs/mobile-edit-habit-walkthrough.md), [archive/restore walkthrough](docs/mobile-archive-restore-walkthrough.md), [Today walkthrough](docs/mobile-today-walkthrough.md), [history walkthrough](docs/mobile-history-walkthrough.md), [two-user sharing walkthrough](docs/mobile-sharing-walkthrough.md), and [mobile excuse walkthrough](docs/mobile-excuses-walkthrough.md) for device validation and automated coverage.
+The mobile app now provides email/password authentication, profile onboarding, a consistent navigation menu, **Friends** with exact username lookup, requests and friendship removal, **Today** with server-provided dates, occurrence states, eligible binary complete/undo actions and absolute target progress, **My habits** with Active/Archived filters, creation/edit forms and archive/restore actions, and optional support diagnostics. Owned active and archived habits also have **Manage sharing**, read-only occurrence history and server-calculated current streaks. **Friends’ habits** provides shared lists/details with each owner’s date/timezone, stored occurrence snapshots and current/provisional streaks. Owners can submit an eligible **Today** excuse and inspect it from Today/history; **Pending excuse decisions** lets currently authorized friends confirm approval or rejection, including for older dates. Shared detail links to accessible excuse details. See the [Android authentication walkthrough](docs/mobile-auth-walkthrough.md), [two-user Friends walkthrough](docs/mobile-friends-walkthrough.md), [My habits walkthrough](docs/mobile-habits-walkthrough.md), [habit creation walkthrough](docs/mobile-create-habit-walkthrough.md), [habit editing walkthrough](docs/mobile-edit-habit-walkthrough.md), [archive/restore walkthrough](docs/mobile-archive-restore-walkthrough.md), [Today walkthrough](docs/mobile-today-walkthrough.md), [history walkthrough](docs/mobile-history-walkthrough.md), [two-user sharing walkthrough](docs/mobile-sharing-walkthrough.md), and [mobile excuse walkthrough](docs/mobile-excuses-walkthrough.md) for device validation and automated coverage.
 
 ### Profile onboarding and API
 
@@ -169,9 +175,9 @@ Set all backend/private variables above in **Render → Service → Environment*
 cd mobile
 Copy-Item .env.example .env
 # edit .env and place the local-only google-services.json
-npm install
-npx expo install --fix
-npx expo-doctor
+npm ci
+npm test
+npm run typecheck
 npx expo start --dev-client
 ```
 
@@ -181,9 +187,9 @@ npx expo start --dev-client
 cd mobile
 cp .env.example .env
 # edit .env and place the local-only google-services.json
-npm install
-npx expo install --fix
-npx expo-doctor
+npm ci
+npm test
+npm run typecheck
 npx expo start --dev-client
 ```
 
@@ -198,22 +204,37 @@ Build with:
 ```bash
 cd mobile
 eas login
-eas init
+# Use the existing linked project/signing credentials; do not reinitialize.
 eas build --platform android --profile preview
 ```
 
 Open EAS's build link on the phone, download/install the APK, and approve Android's “install unknown apps” prompt. This is internal distribution, not Google Play publication.
 
-## Exact end-to-end test procedure
+## Verification
 
-1. Apply the Supabase migration and enable email authentication.
-2. Deploy Render, verify `/health`, store its HTTPS URL in the EAS `preview` environment, and make the EAS preview APK.
-3. Install and launch the APK on a physical Android device with internet access.
-4. Enter an email/password and tap **Sign up**. Confirm email if the Supabase setting requires it, then **Sign in**.
-5. Complete profile onboarding, then open **Settings → Enable notifications** and choose **Allow**. The application service registers this installation for the authenticated account. Confirm its enabled status, then open **Infrastructure diagnostics**, which shares that status. No token is displayed.
-6. Tap **Run Infrastructure Test**. The client generates the ID and timestamp. FastAPI authenticates the caller, inserts and reads back the row, updates verification state, reads that user's latest token, calls Expo, saves the ticket, and responds with timings.
-7. Compare the on-screen request ID to the notification body. The API, database, and push-request stages plus client/server timings appear on screen. Foreground receipt is also shown when observable.
-8. Start another infrastructure test and immediately put the app in the background. Observe whether the remote notification arrives with that run's ID. This test uses the remote push path; configured habit reminders use a separate local engine. Swiping the app away is different from Android **Force stop**, which prevents normal background delivery until the user launches the app again. See the [Android local-reminder checklist](docs/android-local-reminders-verification.md) for those separate cases.
+```bash
+npm ci --prefix mobile
+npm --prefix mobile test
+npm --prefix mobile run typecheck
+# Requires a local Docker daemon and backend dev dependencies:
+bash backend/scripts/test-postgres.sh
+```
+
+The database runner creates and removes a dedicated PostgreSQL container, applies
+all committed migrations with the repository role scaffold, and runs the complete
+API/SQL suite. It cannot accept a shared database URL. Plain `cd backend && pytest`
+runs isolated API tests and skips SQL tests unless a disposable database is supplied.
+
+[Maestro Android smoke automation](mobile/e2e/README.md) covers the owner and two-user
+social journeys with the real native app/API/PostgREST/SQL, fixture Auth and a push
+recorder. The manual `Android native smoke (isolated services)` workflow needs no
+service secrets and sends no real pushes. Mocked Node tests, native UI automation,
+local HTTP integration and live Auth/FCM delivery are distinct verification layers.
+
+For live staging acceptance use the [two-device checklist](docs/android-release-runbook.md#two-device-acceptance-record-evidence-for-each).
+Diagnostics require both explicit flags and a confirmation; they are secondary
+support tools, not the app's main test journey. No shared release action is
+performed by running the ordinary test suites.
 
 ## Troubleshooting
 
@@ -225,9 +246,9 @@ Open EAS's build link on the phone, download/install the APK, and approve Androi
 * **Network error**: ensure `EXPO_PUBLIC_API_URL` is deployed HTTPS, not phone-local `localhost`; visit `/health` from the phone browser.
 * **Duplicate request ID**: retry from the button, which generates a new timestamp/random ID. Database uniqueness intentionally prevents ambiguous proofs.
 
-## Deliberate limitations
+## Behavior and delivery limits
 
-This proof stores Expo ticket IDs but does not poll Expo receipts or implement scheduled token cleanup. Expo ticket acceptance and actual Android display are distinct; the real-phone procedure is the delivery test. Profiles, exact username search, backend friendships, private habit tracking, selective sharing, occurrence excuses with friend approval/rejection, owner history, current streaks, and friend-triggered reminders are implemented. Mobile **Friends** supports accepted friends, incoming/outgoing requests, exact search, send/accept/reject and confirmed removal; outgoing requests are read-only because the backend has no cancellation endpoint. Removing a friend deletes habit sharing in both directions, and becoming friends again does not restore those grants. Mobile sharing is explicit per habit and friend; archive retains grants while hiding recipient views. Mobile excuses preserve the permanent completion/progress lock, original server deadline, current sharing permissions, final friend decisions and server-calculated provisional streaks. Settings provides account-aware notification enable/disable, permission status, and persistent cleanup recovery; see [mobile notifications](docs/mobile-notifications.md). Mobile friend reminder controls and Android local habit scheduling are integrated. Local reminders reconcile on authenticated loading, foreground refresh and relevant successful mutations; Settings exposes permission and scheduling status with retry/resync. Permission denial does not block tracking. Longest streaks, advanced analytics and excuse/social notifications remain deferred. Today supports eligible binary complete/undo and absolute target progress, with owner history and current streaks available from My habits. Friend-triggered reminders reserve a database-enforced 60-minute cooldown per sender/habit, use idempotency keys, and report Expo acceptance separately from actual phone delivery; see [the reminder API and two-user walkthrough](docs/reminders.md). Shared friends receive current streaks but cannot access full occurrence history.
+The API stores Expo ticket IDs but does not poll Expo receipts or implement scheduled token cleanup. Expo ticket acceptance and actual Android display are distinct; the real-phone procedure is the delivery test. Profiles, exact username search, backend friendships, private habit tracking, selective sharing, occurrence excuses with friend approval/rejection, owner history, current streaks, and friend-triggered reminders are implemented. Mobile **Friends** supports accepted friends, incoming/outgoing requests, exact search, send/accept/reject and confirmed removal; outgoing requests are read-only because the backend has no cancellation endpoint. Removing a friend deletes habit sharing in both directions, and becoming friends again does not restore those grants. Mobile sharing is explicit per habit and friend; archive retains grants while hiding recipient views. Mobile excuses preserve the permanent completion/progress lock, original server deadline, current sharing permissions, final friend decisions and server-calculated provisional streaks. Settings provides account-aware notification enable/disable, permission status, and persistent cleanup recovery; see [mobile notifications](docs/mobile-notifications.md). Mobile friend reminder controls and Android local habit scheduling are integrated. Local reminders reconcile on authenticated loading, foreground refresh and relevant successful mutations; Settings exposes permission and scheduling status with retry/resync. Permission denial does not block tracking. Longest streaks, advanced analytics and excuse/social notifications remain deferred. Today supports eligible binary complete/undo and absolute target progress, with owner history and current streaks available from My habits. Friend-triggered reminders reserve a database-enforced 60-minute cooldown per sender/habit, use idempotency keys, and report Expo acceptance separately from actual phone delivery; see [the reminder API and two-user walkthrough](docs/reminders.md). Shared friends receive current streaks but cannot access full occurrence history.
 
 ## Private habit management
 

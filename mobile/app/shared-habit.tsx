@@ -1,6 +1,7 @@
+import { Button, Link } from '../components/ui';
 import { useCallback, useState, useSyncExternalStore } from 'react';
-import { Link, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { ActivityIndicator, AppState, Button, RefreshControl, ScrollView, Text } from 'react-native';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { ActivityIndicator, AppState, RefreshControl, ScrollView, Text } from 'react-native';
 import { Form, Message, styles } from '../components/form';
 import { ReminderControls } from '../components/reminder-controls';
 import { SharedHabitView } from '../components/shared-habit-view';
@@ -34,7 +35,7 @@ function Detail({ id }: { id: string }) {
     <Text accessibilityRole="header" style={styles.title}>Shared habit</Text>
     <Text style={styles.message}>A view of the habit your friend chose to share. Pull down to refresh current access and progress.</Text>
     <Button title="Back to Friends’ habits" onPress={() => router.dismissTo('/shared-habits')} />
-    <Link href="/home" style={styles.message}>Home</Link>
+    <Link href="/home" style={styles.message}>Navigation menu</Link>
     <Button title="Refresh" onPress={store.refresh} disabled={busy} />
     {busy && <ActivityIndicator accessibilityLabel="Loading shared habit" size="large" />}
     {error && <>

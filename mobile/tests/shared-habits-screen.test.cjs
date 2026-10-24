@@ -56,7 +56,8 @@ function text(tree) {
   if (typeof tree === 'string' || typeof tree === 'number') return String(tree);
   return tree && typeof tree === 'object' ? text(tree.props.children) : '';
 }
-const viewModules = { 'react/jsx-runtime': runtime, 'react-native': native, './form': form };
+const viewModules = { ...require('./native-ui-support.cjs'),
+    'react/jsx-runtime': runtime, 'react-native': native, './form': form };
 const view = compile('components/shared-habit-view.tsx', name => {
   assert.ok(viewModules[name], `Unexpected view dependency: ${name}`); return viewModules[name];
 });
@@ -86,6 +87,7 @@ async function screen({ mode = 'list', id = habitId, api = {}, readProfile = asy
     return jsx(type, props, key);
   };
   const modules = {
+    ...require('./native-ui-support.cjs'),
     'react/jsx-runtime': { jsx: routeJSX, jsxs: routeJSX, Fragment: 'Fragment' },
     react: { useCallback: fn => fn, useState: initial => [store ??= initial()], useSyncExternalStore: (_subscribe, snapshot) => snapshot() },
     'expo-router': { Link: 'Link', useFocusEffect: callback => { focus = callback; }, useLocalSearchParams: () => ({ id }),
@@ -309,6 +311,7 @@ test('normal navigation reaches the shared list and both shared routes require a
   let state = { status: 'ready', session: session(), profile: profile('recipient-a'), store: { signOut() {} } };
   const Stack = { Screen: 'Screen', Protected: 'Protected' };
   const modules = {
+    ...require('./native-ui-support.cjs'),
     'react/jsx-runtime': runtime, 'expo-router': { Link: 'Link', Stack }, 'react-native': native,
     'expo-notifications': { setNotificationHandler() {} },
     '../components/account-deletion-gate': { AccountDeletionGate: p => p.children, useAccountDeletion: () => ({ begin: async () => {} }) },

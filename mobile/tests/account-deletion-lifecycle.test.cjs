@@ -64,6 +64,7 @@ async function device({ disk = new Map(), owner = 'a', api = {}, storage = {}, n
       useSyncExternalStore: (_subscribe, snapshot) => snapshot(),
       useEffect: fn => { const index = hook++; if (!(index in hooks)) { hooks[index] = true; effects.push(fn); } },
     },
+    ...require('./native-ui-support.cjs'),
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     'react-native': { Button: 'Button', Text: 'Text', View: 'View' },
     './form': { Form: 'Form', Message: 'Message', styles: {} },

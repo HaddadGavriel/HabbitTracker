@@ -1,5 +1,6 @@
+import { Button } from './ui';
 import { useSyncExternalStore } from 'react';
-import { Button, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { localReminderService } from '../lib/local-reminder-runtime';
 
 export function LocalReminderControls() {
