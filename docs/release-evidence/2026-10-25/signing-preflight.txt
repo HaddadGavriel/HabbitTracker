@@ -1,0 +1,5 @@
+Command: CI=1 npx --yes eas-cli@25.3.0 whoami
+Exit: 1
+Output: Not logged in
+
+Signed APK build: NOT RUN because existing signing access and release configuration are unavailable. No signing identity was generated.

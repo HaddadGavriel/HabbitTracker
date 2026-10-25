@@ -166,13 +166,35 @@ server Supabase URL and secret configured, after separately approving rollout:
 
 ```sh
 cd backend
-python -m app.deletion_maintenance
+python -m app.deletion_maintenance --limit 100 --concurrency 4 --max-seconds 240
 ```
 
 This enumerates only durable pending requests through a service-only RPC, retries
-Auth delete/verification and completion, and prints aggregate counts. It cannot
-start deletion for arbitrary accounts. It is idempotent and may be scheduled by
-operators. Do not reset pending rows, remove tombstones, restore profiles, or
+Auth delete/verification and completion, and prints aggregate JSON counts. It cannot
+start deletion for arbitrary accounts. At most 100 requests are selected, four
+Auth workflows run concurrently, and processing stops after 240 seconds; the
+ledger read also has the adapter's HTTP timeout. A timeout, unexpected error or
+remaining backlog makes the command exit nonzero. Lost responses and interrupted
+remote deletion remain recoverable on the next run. Logs contain no user IDs,
+receipts, passwords, tokens or exception bodies.
+
+`render.yaml` prepares `habit-tracker-deletion-maintenance` every 15 minutes
+(`*/15 * * * *`, UTC), using the existing API service's Supabase variables through
+`fromService`. The job is **not deployed or enabled by this checkout**. Both
+services have `autoDeployTrigger: "off"`; after an authorized initial deployment,
+the cron schedule runs automatically, while new code deployments stay manual.
+Render platform validation and live activation remain release gates.
+
+The backend on-call owns this job. During rollout, enable failed-job notifications,
+record the job ID and a successful staging sweep, and check for missing runs after
+30 minutes or two consecutive nonzero exits. A nonzero exit with a large deferred
+backlog can require a reviewed limit/concurrency adjustment; do not assume every
+pending account will finish in one sweep. Rehearse a lost Auth DELETE response,
+retry to completion, an empty sweep, and a forced failure with aggregate-only logs.
+Verify the configured failure notification before treating maintenance as active.
+No live sweep or operational alert was executed in this workspace.
+
+Do not reset pending rows, remove tombstones, restore profiles, or
 re-enable a pending account to work around an outage. Correct configuration/Auth
 availability and rerun maintenance. If a client loses its receipt or uninstalls,
 maintenance still finishes deletion; support should use authenticated operational
@@ -220,3 +242,8 @@ Recovery lifecycle fixes verified locally (2026-10-23): **695 mobile tests passe
 and TypeScript `tsc --noEmit` passed. Backend code and migrations are unchanged
 by this correction. The regressions cover all three reported account-switch
 failures, restart, delayed responses, queued cleanup and preserved B state.
+
+For the current dependency upgrades, bounded maintenance tests, scheduling
+configuration and operational blockers, use the
+[2026-10-25 release evidence](android-release-validation.md). The earlier counts
+above describe their dated revisions, not the current checkout.

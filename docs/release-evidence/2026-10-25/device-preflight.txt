@@ -1,0 +1,9 @@
+Command: adb devices -l
+List of devices attached
+(no device rows)
+
+Command: bash mobile/scripts/capture-local-reminder-device.sh release-2026-10-25
+Exit: 1
+error: no devices/emulators found
+
+No physical-device screenshots, delivery observations or Maestro report exist.

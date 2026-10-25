@@ -15,6 +15,7 @@ from test_occurrences import OWNER, OID, ROW
 EID, FRIEND = str(UUID(int=10)), str(UUID(int=11))
 EXCUSE = {
     "id": EID, "occurrence_id": OID, "habit_id": ROW["habit_id"], "owner_id": OWNER,
+    "owner": {"user_id": OWNER, "display_name": "Alex Rivera", "username": "alex_reads"},
     "explanation": "Recovering from illness", "status": "pending", "decision_source": None,
     "decided_by": None, "decided_at": None, "created_at": "2026-03-01T12:00:00Z",
     "occurrence": ROW | {"state": "justification_pending"},
@@ -261,6 +262,17 @@ def test_friend_decision_contract(api, decision, state, status):
     assert response.status_code == 200 and response.json()["status"] == status
     assert response.json()["decided_by"] == FRIEND and response.json()["occurrence"]["state"] == state
     assert database.calls == [("decide", FRIEND, EID, decision)]
+
+
+@pytest.mark.parametrize("method,path,body,status", ENDPOINTS)
+def test_excuse_responses_include_only_public_owner_identity(api, method, path, body, status):
+    client, database = api
+    database.rows[0]["owner"].update(email="private@example.test", timezone="UTC", notifications_enabled=True)
+    response = client.request(method, path, json=body)
+    assert response.status_code == status
+    row = response.json()[0] if path == "/excuses/pending" else response.json()
+    assert row["owner"] == EXCUSE["owner"]
+    assert row["owner"]["user_id"] == row["owner_id"]
 
 
 def test_pending_list_retains_database_order_and_older_occurrences(api):

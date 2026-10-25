@@ -236,6 +236,7 @@ export type ExcuseResult = HistoryExcuse & {
   occurrence_id: string;
   habit_id: string;
   owner_id: string;
+  owner: PublicProfile;
   occurrence: OccurrenceResult;
 };
 

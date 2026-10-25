@@ -23,6 +23,10 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements-dev.txt
       - run: python -m pip install -r requirements-dev.txt
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
       - run: python -m pytest -q
   postgres-integration:
     runs-on: ubuntu-latest

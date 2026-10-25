@@ -1,0 +1,41 @@
+Mobile tests
+ℹ tests 731
+ℹ suites 0
+ℹ pass 731
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 24240.179629
+
+TypeScript
+
+> habit-tracker-infrastructure-proof@0.1.0 typecheck
+> tsc --noEmit
+
+
+Backend/PostgreSQL
+........................................................................ [ 95%]
+........................................................................ [ 99%]
+.....                                                                    [100%]
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /workspace/HabbitTracker/backend/.venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1733 passed, 1 warning in 87.27s (0:01:27)
+
+Python audit
+No known vulnerabilities found
+
+Local HTTP fixture integration
+PASS: local Auth fixture → real HTTP API → real PostgREST → migrated PostgreSQL; owner/social authorization, idempotency and fake push recording. No device or live Auth/FCM claim.
+
+npm 10 lock check
+
+added 9 packages in 1s
+
+npm 11 lock check
+
+up to date in 897ms

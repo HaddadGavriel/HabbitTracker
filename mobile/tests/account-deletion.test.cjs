@@ -104,7 +104,7 @@ test('real Settings destructive controls require exact phrase, mask password and
 });
 test('deleted decision maker is accepted only with null identity', () => {
   const { validateExcuse }=compile('lib/excuse-detail-store.ts', name => name==='./api' ? {ApiError:class extends Error {}} : {});
-  const row={id:'e',explanation:'Saved',status:'approved',occurrence_id:'o',owner_id:'a',habit_id:'h',decision_source:'deleted_friend',decided_by:null,decided_at:'2026-10-22T12:00Z',occurrence:{id:'o',owner_id:'a',habit_id:'h',state:'excused',completed:false}};
+  const row={id:'e',explanation:'Saved',status:'approved',occurrence_id:'o',owner_id:'a',owner:{user_id:'a',display_name:'Owner',username:'owner'},habit_id:'h',decision_source:'deleted_friend',decided_by:null,decided_at:'2026-10-22T12:00Z',occurrence:{id:'o',owner_id:'a',habit_id:'h',state:'excused',completed:false}};
   assert.doesNotThrow(()=>validateExcuse(row));
   assert.throws(()=>validateExcuse({...row,decided_by:'fake-profile'}));
 });

@@ -45,9 +45,13 @@ try:
     docker('run', '-d', '--name', pg, '--network', name, '-e', 'POSTGRES_PASSWORD=disposable-only',
            '-p', '127.0.0.1::5432', 'postgres:16')
     for _ in range(30):
-        if subprocess.call([*DOCKER, 'exec', pg, 'pg_isready', '-U', 'postgres'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0:
+        # The image briefly starts a socket-only init server, then restarts it.
+        # Wait for the final TCP listener before applying the fixture scaffold.
+        if subprocess.call([*DOCKER, 'exec', pg, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0:
             break
         time.sleep(1)
+    else:
+        raise RuntimeError('Disposable PostgreSQL did not become ready')
     sql((ROOT / 'backend/tests/postgres_scaffold.sql').read_text())
     for migration in sorted((ROOT / 'supabase/migrations').glob('*.sql')):
         sql(migration.read_text())

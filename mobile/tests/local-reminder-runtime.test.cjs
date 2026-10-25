@@ -147,6 +147,26 @@ function coordinator(options = {}) {
   return { service, native, nativeState, saved, calls, current, state };
 }
 
+test('unsupported timezone pauses reminders visibly without losing opt-in and recovers after correction', async () => {
+  const x = coordinator();
+  x.native.reconcile = async () => ({ status: 'unsupported_timezone' });
+  await x.service.setSession(x.state('ready'));
+  assert.equal(x.service.snapshot().status, 'error');
+  assert.equal(x.service.snapshot().nativeStatus, 'unsupported_timezone');
+  assert.equal(x.service.snapshot().enabled, true);
+  assert.equal(x.service.snapshot().lastSuccess, null);
+  assert.match(x.service.snapshot().message, /paused.*Settings.*UTC.*dates and deadlines stay unchanged/);
+  assert.equal(x.saved.owner, alice);
+  assert.equal(x.calls.filter(([name]) => name === 'cancel').length, 0);
+  x.native.reconcile = async () => ({ status: 'scheduled_os_limited' });
+  await x.service.refresh();
+  assert.equal(x.service.snapshot().status, 'scheduled');
+  assert.equal(x.saved.owner, alice);
+  await x.service.setSession(x.state('signed_out', null));
+  assert.equal(x.saved.owner, null);
+  assert.equal(x.nativeState.cancelled, true);
+});
+
 test('deletion cancellation queued behind native work cannot cancel B reminders after ownership changes', async () => {
   const x = coordinator(), native = deferred(); let current = true;
   await x.service.setSession(x.state('ready'));
@@ -184,17 +204,43 @@ test('foreground and polling refreshes during startup/profile hydration cannot c
   assert.equal(x.service.snapshot().status, 'scheduled');
 });
 
-test('initial loading for a different account cancels persisted local work before profile readiness', async () => {
+for (const initiallyReady of [false, true]) test(`same-owner profile failure preserves opt-in and pauses work; initially ready=${initiallyReady}`, async () => {
   const x = coordinator();
-  await x.service.setSession(x.state('loading', session(bob)));
-  assert.equal(x.saved.owner, null); assert.deepEqual(x.calls, [['cancel']]);
+  await x.service.setSession(x.state(initiallyReady ? 'ready' : 'loading'));
+  const before = x.calls.length;
+  await x.service.setSession(x.state('failure'));
+  await x.service.refresh();
+  await x.service.enable();
+  await x.service.changed(x.current, { habitId: 'habit' });
+  assert.equal(x.saved.owner, alice);
+  assert.equal(x.nativeState.cancelled, false);
+  assert.equal(x.calls.length, before, 'profile failure cannot cancel, acquire, suppress or reconcile');
+  await x.service.setSession(x.state('loading'));
+  await x.service.refresh();
+  assert.equal(x.calls.length, before);
+  await x.service.setSession(x.state('ready'));
+  assert.equal(x.service.snapshot().enabled, true);
+  assert.equal(x.service.snapshot().status, 'scheduled');
+  assert.equal(x.calls.filter(([name]) => name === 'reconcile').length, initiallyReady ? 2 : 1);
 });
 
-test('signed-out or failed authentication after profile hydration cancels persisted same-account work', async () => {
+for (const status of ['loading', 'failure']) test(`initial ${status} for a different account cancels persisted local work before profile readiness`, async () => {
+  const x = coordinator();
+  const changing = x.service.setSession(x.state(status, session(bob)));
+  await x.service.enable(); // A captured control cannot invalidate pending account cleanup.
+  await changing;
+  assert.equal(x.saved.owner, null); assert.deepEqual(x.calls, [['cancel']]);
+  await x.service.setSession(x.state('ready', session(bob)));
+  assert.equal(x.service.snapshot().enabled, false, 'account B does not inherit account A opt-in');
+  assert.ok(!x.calls.some(([name]) => name === 'acquire' || name === 'reconcile'));
+});
+
+test('signed-out, missing-session failure or missing profile cancels persisted same-account work', async () => {
   for (const status of ['signed_out', 'failure', 'profile_required']) {
     const x = coordinator();
     await x.service.setSession(x.state('loading'));
-    await x.service.setSession(x.state(status, status === 'signed_out' ? null : x.current));
+    await x.service.setSession(x.state('failure'));
+    await x.service.setSession(x.state(status, status === 'profile_required' ? x.current : null));
     assert.equal(x.nativeState.cancelled, true);
     assert.equal(x.saved.owner, null);
     assert.equal(x.service.snapshot().enabled, false);
@@ -213,7 +259,7 @@ test('account-deletion hook confirms native cleanup and rejects when cancellatio
 
 
 test('preference hydration failure cancels unknown persisted native ownership before reporting failure', async () => {
-  for (const status of ['loading', 'ready']) {
+  for (const status of ['loading', 'failure', 'ready']) {
     const x = coordinator({ loadError: true });
     await x.service.setSession(x.state(status, session(bob)));
     assert.equal(x.nativeState.cancelled, true);

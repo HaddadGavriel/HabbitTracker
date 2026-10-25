@@ -1,6 +1,6 @@
 # Habit Tracker Android release candidate
 
-This PR prepares a release; it does not deploy, apply shared migrations, change
+This checkout prepares a release; it does not deploy, apply shared migrations, change
 live settings or establish production readiness. See [requirements](android-release-checklist.md)
 and [validation evidence](android-release-validation.md). Device checks below are
 release gates, not claimed results.
@@ -12,14 +12,19 @@ release gates, not claimed results.
    two disposable accounts. Never use production credentials in automation.
 2. Review `supabase migration list`, then apply **every unapplied migration in filename
    order**, `202610050001_infrastructure_proof.sql` through
-   `202610220001_account_deletion.sql`. Use the same reviewed files as tested locally.
-   Do not edit/reapply old migrations. This PR adds no schema migration. The last
-   migration wraps 31 service RPCs, fences pending deletion and preserves anonymous
-   final decisions; skipping it breaks the matching API. Follow [deletion recovery](account-deletion.md).
+   `20261025113327_excuse_owner_identity.sql` (16 files in this checkout). Use the
+   same reviewed files as tested locally. Do not edit/reapply old migrations.
+   The account-deletion migration wraps 31 service RPCs and fences deletion; the
+   latest migration adds authorized owner identity to excuse responses. Apply it
+   before the matching API/mobile release. Follow [deletion recovery](account-deletion.md).
 3. Deploy matching FastAPI source to the existing Render service (`backend`, Python
    3.12, `pip install -r requirements.txt`, `uvicorn app.main:app --host 0.0.0.0 --port $PORT`).
    Check `/health`, then authenticated profile, Today and reminder-plan reads in
    staging. `/health` alone does not verify Auth/database readiness.
+   Separately validate and deploy the prepared deletion cron from `render.yaml`,
+   verify its environment references and failure notifications, and record an
+   empty run plus a staged pending-deletion recovery. Automatic code deployments
+   are off. The cron is not established operationally until those checks pass.
 4. Configure staging callback/FCM settings, build the preview APK with the existing
    EAS project and signing key, install/update on two Android devices, and complete
    the acceptance checklist. Record APK SHA256, commit, EAS build ID, versionCode,
@@ -67,6 +72,8 @@ acceptance ticket is not evidence of FCM delivery. Full setup: [Firebase/EAS gui
 ## APK build, install and update
 
 Use the lockfile: `cd mobile && npm ci && npm test && npm run typecheck`.
+Resolve the outstanding [dependency/release blockers](android-release-validation.md)
+before distribution; a passing app test suite does not clear the advisory gate.
 Validate with `npx expo config --type public`, then use existing EAS credentials:
 
 ```bash
@@ -98,8 +105,12 @@ deletion guards and the current schema; reverting before #31 is unsafe. Releasin
 an older UI still requires a **new higher versionCode** signed with the same key.
 Do not downgrade/uninstall a user's app to sidestep Android update rules.
 
-This PR adds a native `expo-system-ui` dependency for consistent light-theme
-contrast. It needs a new APK, not a JS-only update to an older native runtime.
+This checkout includes native reminder repair, timezone validation and the shared
+timezone catalog, in addition to `expo-system-ui`. It requires a rebuilt APK.
+Unsupported legacy profiles remain readable; unsupported native plans pause with
+an actionable status until a fresh supported plan can recover. See the
+[timezone contract](timezone-contract.md). Keep the full repository available to
+native builds so the shared catalog is packaged from `backend/app/data`.
 The repository does not configure `expo-updates`/runtimeVersion/channels; do not
 invent an OTA channel or change EAS identity during this release. Existing schemes,
 notification channel IDs, registration and reminder journal formats are preserved.
@@ -127,7 +138,9 @@ TalkBack pass. Restore normal device settings after testing.
   revoke/remove clears recipient access on refresh/foreground and blocks stale writes.
 - [ ] A submits shared excuse; B sees pending/provisional streak and confirms a final
   decision; A refreshes Today/history. Check unshared automatic approval, immutable
-  explanation/decision and preserved progress/deadline.
+  explanation/decision and preserved progress/deadline. With identical habits from
+  different friends, verify owner display name and username in the card,
+  irreversible confirmation, and TalkBack action labels; only the selected excuse changes.
 - [ ] B sends remote reminder while A has an eligible habit and enabled registration.
   Record actual A tray/display, cold/warm tap navigation, duplicate-key and cooldown
   behavior. Repeat with denied permission/no registered device; distinguish acceptance
@@ -135,6 +148,8 @@ TalkBack pass. Restore normal device settings after testing.
 - [ ] Enable/resync local scheduling; check remaining reminders after completion,
   undo, excuse, archive, timezone changes, foreground, process death and reboot.
   Test alarm/notification denial and force-stop limits using the [native checklist](android-local-reminders-verification.md).
+  Also verify offline same-owner startup preserves opt-in, routine repair preserves
+  delayed alarms, and an unsupported profile/snapshot pauses rather than shifting times.
 - [ ] Offline reads show errors/last-loaded status; writes never claim offline success.
   Reconnect and explicitly reconcile uncertain saves before retry. Foreground on both
   devices updates statuses without duplicate mutation or notification handlers.

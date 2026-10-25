@@ -14,7 +14,10 @@ Links are validated in an isolated, nonpersistent Supabase Auth client and verif
 
 Accepted native URIs are `habittrackerinfra://auth-callback` (also triple-slash form), plus the existing scheme's root callback `habittrackerinfra://` for earlier email redirects. Existing non-auth app URI paths remain unchanged. Query or fragment credentials may contain either `token_hash` and `type`, or `access_token`, `refresh_token`, and `type`. Optional bearer/expiry metadata is validated. Duplicate/unknown parameters, mixed credential formats, provider errors, unsupported routes/types, and PKCE `code` callbacks fail closed. This app explicitly uses the implicit flow; do not configure PKCE-only email redirects. Link verification rejects expired/used token hashes and invalid/revoked sessions. Supabase can renew a still-valid implicit session using its refresh token; implicit session URLs are bearer credentials, not an independently one-time token. Duplicate delivery during an active flow is ignored; opening an already handled link later in the same process displays a fresh-link error. For server-enforced one-time verification across app restarts, use the token-hash templates below.
 
-No email-change, social-login, or account-deletion flow is added. Android package `com.haddadgavriel.habittracker`, scheme `habittrackerinfra`, and EAS project `4f31560d-6323-41f7-ae0a-f792a4814c98` are unchanged.
+Email-change and social login remain outside scope. Settings also provides the
+separate [account-deletion flow](account-deletion.md). Android package
+`com.haddadgavriel.habittracker`, scheme `habittrackerinfra`, and EAS project
+`4f31560d-6323-41f7-ae0a-f792a4814c98` are unchanged.
 
 ## External Supabase setup — not performed by this PR
 

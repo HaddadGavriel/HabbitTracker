@@ -9,6 +9,9 @@ const emptyState = (): State => ({ excuse: null, loading: false, error: null });
 
 export function validateExcuse(excuse: ExcuseResult, occurrenceId?: string) {
   if (!excuse || typeof excuse.id !== 'string' || typeof excuse.explanation !== 'string'
+    || !excuse.owner || excuse.owner.user_id !== excuse.owner_id
+    || typeof excuse.owner.display_name !== 'string' || !excuse.owner.display_name.trim()
+    || typeof excuse.owner.username !== 'string' || !excuse.owner.username.trim()
     || !excuse.occurrence || excuse.occurrence.id !== excuse.occurrence_id
     || excuse.occurrence.owner_id !== excuse.owner_id || excuse.occurrence.habit_id !== excuse.habit_id
     || (occurrenceId && excuse.occurrence_id !== occurrenceId)

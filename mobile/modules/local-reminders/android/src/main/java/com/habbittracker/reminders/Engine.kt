@@ -20,6 +20,12 @@ import java.util.concurrent.TimeUnit
 
 /** All entry points, receivers and workers share this process and monitor. No JS execution. */
 internal object Engine {
+  enum class RepairReason { ROUTINE, ALARM, RECOVERY }
+  fun reasonForBroadcast(action: String?): RepairReason = when (action) {
+    "com.habbittracker.REMINDER" -> RepairReason.ALARM
+    Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> RepairReason.RECOVERY
+    else -> RepairReason.ROUTINE
+  }
   private const val CHANNEL = "local-habit-reminders"
   private const val WORK = "local-reminder-repair-v1"
   private fun file(c: Context) = AtomicFile(File(c.noBackupFilesDir, "local-reminders-v1.json"))
@@ -78,6 +84,7 @@ internal object Engine {
     if (s.isNull("plan")) return emptyList()
     val p = s.getJSONObject("plan")
     require(p.getInt("version") == 1 && p.getString("owner_id") == s.getString("owner"))
+    TimezonePolicy.resolve(p.getString("timezone")) // Validate even an empty plan.
     val owner = s.getString("owner")
     val result = mutableListOf<Planner.Rule>()
     val effective = p.getJSONArray("effective")
@@ -161,6 +168,28 @@ internal object Engine {
     return Journal.State(s.getString("lease"), rules(s), Instant.parse(j.getString("cursor")), windows,
       j.getLong("total"), j.getLong("acknowledged"), j.getBoolean("presentationPending"))
   }
+  /** A fresh supported plan can recover a quarantined journal without parsing
+   * its unsupported rules. Keep receipt counters; never replay paused work. */
+  private fun timezoneRecoveryState(s: JSONObject): Journal.State {
+    val j = s.optJSONObject("journal")
+    if (j != null) {
+      require(j.getInt("version") == 2)
+      return Journal.State(s.getString("lease"), emptyList(), Instant.parse(j.getString("cursor")),
+        emptyList(), j.getLong("total"), j.getLong("acknowledged"), false)
+    }
+    val counted = s.optString("countedBatch")
+    val cursor = maxOf(Instant.parse(s.getString("cursor")),
+      if (counted.isEmpty()) Instant.EPOCH else Instant.parse(counted))
+    return Journal.State(s.getString("lease"), emptyList(), cursor, emptyList(), s.optLong("unreadCount", 0), 0, false)
+  }
+  private fun pauseForTimezone(c: Context, s: JSONObject): Map<String, Any> {
+    // Persist before cancellation so a receiver/worker cannot revive the old
+    // schedule. Preserve the raw plan, immutable snapshots and journal evidence.
+    if (!s.optBoolean("timezoneBlocked")) write(c, s.put("timezoneBlocked", true))
+    alarm(c).cancel(intent(c))
+    c.getSystemService(NotificationManager::class.java).cancel("local-reminders", 1)
+    return mapOf("status" to "unsupported_timezone")
+  }
   private fun storeJournal(s: JSONObject, state: Journal.State): JSONObject {
     val backlog = JSONArray()
     for (w in state.backlog) {
@@ -180,6 +209,8 @@ internal object Engine {
     override fun load(): Journal.State? = read(c)?.let { readJournal(it) }
     override fun save(state: Journal.State) {
       val s = requireNotNull(read(c)); check(s.getString("lease") == state.lease)
+      // Clear a permission-recovery request atomically with cursor advancement.
+      s.remove("recoverMissed")
       write(c, storeJournal(s, state))
     }
     override fun arm(time: Instant) {
@@ -222,8 +253,11 @@ internal object Engine {
     if (!s.isNull("plan") && Instant.parse(p.getString("server_time")) <
       Instant.parse(s.getJSONObject("plan").getString("server_time"))) return repair(c)
     val candidate = JSONObject(s.toString()).put("plan", p)
-    if (futureOnly) candidate.put("futureOnly", true).remove("suppressed")
-    val replacementRules = rules(candidate) // validate before any persistence
+    candidate.remove("timezoneBlocked")
+    if (futureOnly) {
+      candidate.put("futureOnly", true).remove("suppressed")
+      candidate.remove("recoverMissed")
+    }
     val elapsed = SystemClock.elapsedRealtime()
     require(started >= 0 && started <= elapsed && elapsed - started <= 120_000) { "stale clock sample" }
     // Server time is a lower bound at receipt. Do not fire early or skip an
@@ -232,11 +266,25 @@ internal object Engine {
     candidate.put("anchor", serverNow.toString()).put("elapsed", elapsed)
       .put("wall", System.currentTimeMillis()).put("boot", boot(c))
       .put("clockUncertaintyMs", elapsed - started)
-    val replacement = if (futureOnly) Journal.reconcile(readJournal(s), lease, replacementRules, serverNow)
-      else Journal.replacement(readJournal(s), lease, replacementRules, serverNow,
+    var replacementRules = try { rules(candidate) }
+      catch (_: TimezonePolicy.UnsupportedTimezone) { return pauseForTimezone(c, candidate) }
+    var timezoneRecovery = s.optBoolean("timezoneBlocked")
+    val previous = try {
+      if (timezoneRecovery) timezoneRecoveryState(s) else readJournal(s)
+    } catch (_: TimezonePolicy.UnsupportedTimezone) {
+      timezoneRecovery = true
+      timezoneRecoveryState(s)
+    }
+    if (timezoneRecovery) {
+      candidate.put("futureOnly", true).remove("suppressed")
+      candidate.remove("recoverMissed")
+      replacementRules = rules(candidate)
+    }
+    val replacement = if (futureOnly || timezoneRecovery) Journal.reconcile(previous, lease, replacementRules, serverNow)
+      else Journal.replacement(previous, lease, replacementRules, serverNow,
         LocalDate.parse(p.getString("local_date")))
     write(c, storeJournal(candidate, replacement)) // Plan, clock, backlog and outbox commit together.
-    if (futureOnly) c.getSystemService(NotificationManager::class.java).cancel("local-reminders", 1)
+    if (futureOnly || timezoneRecovery) c.getSystemService(NotificationManager::class.java).cancel("local-reminders", 1)
     return repair(c)
   }
   /** A server-confirmed mutation is applied before the next network refresh. */
@@ -248,7 +296,10 @@ internal object Engine {
     val suppressed = s.optJSONArray("suppressed") ?: JSONArray()
     suppressed.put(JSONObject().put("habit", id).put("date", localDate ?: JSONObject.NULL))
     val candidate = JSONObject(s.toString()).put("suppressed", suppressed).put("futureOnly", true)
-    write(c, storeJournal(candidate, Journal.reconcile(readJournal(s), lease, rules(candidate), now(c))))
+    if (s.optBoolean("timezoneBlocked")) return pauseForTimezone(c, s)
+    val reconciled = try { Journal.reconcile(readJournal(s), lease, rules(candidate), now(c)) }
+      catch (_: TimezonePolicy.UnsupportedTimezone) { return pauseForTimezone(c, s) }
+    write(c, storeJournal(candidate, reconciled))
     // One generic shared summary cannot selectively represent its former members.
     c.getSystemService(NotificationManager::class.java).cancel("local-reminders", 1)
     return repair(c)
@@ -283,20 +334,33 @@ internal object Engine {
     failure?.let { throw it }
     return mapOf("status" to "cancelled")
   }
-  @Synchronized fun repair(c: Context, deliverAlarm: Boolean = false): Map<String, Any> {
+  @Synchronized fun repair(c: Context, reason: RepairReason = RepairReason.ROUTINE): Map<String, Any> {
     return try {
       channels(c)
-      if (read(c) == null) { alarm(c).cancel(intent(c)); return mapOf("status" to "cancelled") }
+      val saved = read(c)
+      if (saved == null) { alarm(c).cancel(intent(c)); return mapOf("status" to "cancelled") }
+      if (saved.optBoolean("timezoneBlocked")) return pauseForTimezone(c, saved)
+      try { readJournal(saved) }
+      catch (_: TimezonePolicy.UnsupportedTimezone) { return pauseForTimezone(c, saved) }
+      val futureOnly = saved.optBoolean("futureOnly", false)
       worker(c)
       if (!allowed(c)) {
         alarm(c).cancel(intent(c))
         c.getSystemService(NotificationManager::class.java).cancel("local-reminders", 1)
+        // Permission restoration is recovery, even if the next entry is a status
+        // check or a stale alarm callback in a new process.
+        if (futureOnly && !saved.optBoolean("recoverMissed", false)) write(c, saved.put("recoverMissed", true))
         return mapOf("status" to "permission_blocked")
       }
       var usedInexact = false
       val coordinator = Journal(port(c) { usedInexact = true })
-      val caughtUp = if (requireNotNull(read(c)).optBoolean("futureOnly", false)) {
-        coordinator.tickFutureOnly(now(c), deliverAlarm); true
+      val caughtUp = if (futureOnly) {
+        when {
+          reason == RepairReason.RECOVERY || saved.optBoolean("recoverMissed", false) -> coordinator.recoverFutureOnly(now(c))
+          reason == RepairReason.ALARM -> coordinator.deliverFutureOnly(now(c))
+          else -> coordinator.repairFutureOnly()
+        }
+        true
       } else coordinator.tick(now(c))
       val state = requireNotNull(read(c))
       if (!caughtUp) return mapOf("status" to "catchup_pending")
@@ -316,7 +380,7 @@ class ReminderReceiver : BroadcastReceiver() {
       .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "HabitTracker:Reminder")
     wake.acquire(9_000L)
     Thread {
-      try { Engine.repair(context.applicationContext, intent.action == "com.habbittracker.REMINDER") }
+      try { Engine.repair(context.applicationContext, Engine.reasonForBroadcast(intent.action)) }
       finally { if (wake.isHeld) wake.release(); result.finish() }
     }.start()
   }

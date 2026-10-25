@@ -8,6 +8,11 @@ candidate, not a claim of production/device verification. Start with the
 [release runbook](docs/android-release-runbook.md), [requirements checklist](docs/android-release-checklist.md)
 and [actual validation evidence](docs/android-release-validation.md).
 
+Release remains blocked on two Expo toolchain advisories, live deletion-maintenance
+activation, an APK signed with the existing key, and physical-device acceptance.
+The current checkout prepares a bounded deletion cron with automatic deployments
+off; it does not deploy or run maintenance against a shared account database.
+
 ## Architecture
 
 ```text

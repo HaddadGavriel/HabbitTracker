@@ -38,6 +38,7 @@ public class EngineTest {
     next(rule("Pacific/Apia", "2011-12-24", "08:00", Set.of(5)), "2011-12-24T00:00:00Z", "2012-01-05T18:00:00Z");
     replacementAndFailures(a, b);
     backlogAndAuthority(a);
+    routineRepairPreservesDelayedAlarm(a, b);
     productRecoveryAndFailures(a, b);
     System.out.println("Planner and journal tests passed (DST, replacement, bounded backlog, durable outbox and faults)");
   }
@@ -99,19 +100,36 @@ public class EngineTest {
     replace(j, current, later); j.tick(later); eq(p.state.total, 132L);
     p.state = null; j.restore(); eq(p.armed, null); // cancellation discards all prior-account work
   }
+  static void routineRepairPreservesDelayedAlarm(Planner.Rule a, Planner.Rule b) {
+    Fake p = new Fake();
+    p.state = new Journal.State("lease", List.of(a, a, b), at("00:00"));
+    for (int i = 0; i < 3; i++) new Journal(p).repairFutureOnly();
+    eq(p.state.cursor, at("00:00")); eq(p.state.total, 0L);
+    eq(p.armed, at("08:00")); eq(p.presentations.size(), 0);
+    new Journal(p).deliverFutureOnly(at("09:05"));
+    eq(p.state.total, 1L); eq(p.presentations.size(), 1); eq(p.presentationCalls, 1);
+    eq(p.state.cursor, at("09:05"));
+    eq(p.armed, Instant.parse("2026-10-22T08:00:00Z"));
+    // Repeated repairs and already-queued duplicate alarm callbacks cannot replay.
+    for (int i = 0; i < 3; i++) {
+      new Journal(p).repairFutureOnly();
+      new Journal(p).deliverFutureOnly(at("09:05"));
+    }
+    eq(p.state.total, 1L); eq(p.presentations.size(), 1); eq(p.presentationCalls, 1);
+  }
   static void productRecoveryAndFailures(Planner.Rule a, Planner.Rule b) {
     Fake p = new Fake(); Journal j = new Journal(p);
     p.state = new Journal.State("lease", List.of(a, b), at("00:00"));
     // Foreground refresh skips the elapsed reminder and arms only the future one.
     p.state = Journal.reconcile(p.state, "lease", List.of(a, b), at("08:05"));
-    j.tickFutureOnly(at("08:05"), false);
+    j.repairFutureOnly();
     eq(p.state.total, 0L); eq(p.armed, at("09:00")); eq(p.presentations.size(), 0);
     // An alarm delayed beyond two times displays one batch, never a catch-up burst.
     p.state = new Journal.State("lease", List.of(a, b), at("00:00"));
-    j.tickFutureOnly(at("09:05"), true);
+    j.deliverFutureOnly(at("09:05"));
     eq(p.state.total, 1L); eq(p.presentations.size(), 1);
     eq(p.armed, Instant.parse("2026-10-22T08:00:00Z"));
-    new Journal(p).tickFutureOnly(at("09:05"), false);
+    new Journal(p).repairFutureOnly();
     eq(p.state.total, 1L); eq(p.presentations.size(), 1);
     // Suppression/reconciliation removes current snapshots and acknowledges the
     // shared presentation while retaining tomorrow's rules; no old backlog survives.
@@ -121,24 +139,25 @@ public class EngineTest {
     // A crash after posting but before acknowledgement must not post twice on restart.
     p.state = new Journal.State("lease", List.of(a, b), at("00:00"));
     p.presentations.clear(); p.failAfterPresentation = true;
-    fails(() -> j.tickFutureOnly(at("08:00"), true));
+    fails(() -> j.deliverFutureOnly(at("08:00")));
     eq(p.state.total, 1L); eq(p.state.presentationPending, true);
     p.failAfterPresentation = false; p.failSave = false;
-    new Journal(p).tickFutureOnly(at("08:01"), false);
+    new Journal(p).repairFutureOnly();
     eq(p.state.total, 1L); eq(p.state.presentationPending, false); eq(p.presentations.size(), 1);
     // A partial arm failure preserves desired future state for an idempotent retry.
     p.failArm = true;
-    fails(() -> j.tickFutureOnly(at("08:02"), false));
-    p.failArm = false; new Journal(p).tickFutureOnly(at("08:03"), false);
+    fails(() -> j.repairFutureOnly());
+    p.failArm = false; new Journal(p).repairFutureOnly();
     eq(p.armed, at("09:00")); eq(p.state.total, 1L);
     fails(() -> Journal.reconcile(p.state, "old-lease", List.of(a), at("09:00")));
     // An arbitrarily long offline interval is skipped in one pass.
-    new Journal(p).tickFutureOnly(Instant.parse("2030-01-01T09:05:00Z"), false);
+    new Journal(p).recoverFutureOnly(Instant.parse("2030-01-01T09:05:00Z"));
     eq(p.state.total, 1L); eq(p.state.backlog.size(), 0);
     eq(p.armed, Instant.parse("2030-01-02T08:00:00Z"));
   }
   static class Fake implements Journal.Port {
     Journal.State state; Instant armed; boolean failArm, failSave, failPresent, failAfterPresentation;
+    int presentationCalls;
     Map<Long, Long> presentations = new HashMap<>();
     public Journal.State load() { return state; }
     public void save(Journal.State value) { if (failSave) throw new IllegalStateException(); state = value; }
@@ -146,6 +165,7 @@ public class EngineTest {
     public void cancel() { armed = null; }
     public void present(Journal.State value) {
       if (failPresent) throw new IllegalStateException();
+      presentationCalls++;
       Long count = presentations.put(value.total, value.total - value.acknowledged);
       if (count != null) eq(count, value.total - value.acknowledged);
       if (failAfterPresentation) failSave = true;

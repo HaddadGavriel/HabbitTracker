@@ -112,9 +112,22 @@ public final class Journal {
       List.of(), old.total, old.total, false);
   }
 
-  /** Recovery never replays missed reminders. A delayed real alarm can present one
-   * batch, then skips other elapsed times in a single durable cursor transition. */
-  public void tickFutureOnly(Instant now, boolean deliver) {
+  /** Routine maintenance must not consume a delayed alarm's uncounted batch.
+   * An ambiguous presentation was already counted; discard only that outbox. */
+  public void repairFutureOnly() {
+    State state = port.load();
+    if (state != null && state.presentationPending) port.save(state.presented());
+    restore();
+  }
+
+  /** Explicit recovery skips missed backlog without presenting a catch-up burst. */
+  public void recoverFutureOnly(Instant now) { advanceFutureOnly(now, false); }
+
+  /** A delayed real alarm presents at most one due batch, then skips other elapsed
+   * times in a single durable cursor transition. Duplicate callbacks stay inert. */
+  public void deliverFutureOnly(Instant now) { advanceFutureOnly(now, true); }
+
+  private void advanceFutureOnly(Instant now, boolean deliver) {
     State state = port.load();
     if (state == null) { port.cancel(); return; }
     boolean due = deliver && !state.pending.isEmpty() && !state.pending.get(0).instant.isAfter(now);

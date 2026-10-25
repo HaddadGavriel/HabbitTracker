@@ -5,9 +5,11 @@ mobile_root=$(cd "$(dirname "$0")/.." && pwd)
 verification_dir=${REMINDER_NATIVE_WORK_DIR:-$(mktemp -d)}
 source_dir="$mobile_root/modules/local-reminders/android/src"
 mkdir -p "$verification_dir/src/main/java/com/habbittracker/reminders" "$verification_dir/src/test/java/com/habbittracker/reminders"
-for source in Planner.java Journal.java Engine.kt; do
+for source in TimezonePolicy.java Planner.java Journal.java Engine.kt; do
   cp "$source_dir/main/java/com/habbittracker/reminders/$source" "$verification_dir/src/main/java/com/habbittracker/reminders/"
 done
+mkdir -p "$verification_dir/src/main/resources"
+cp "$mobile_root/../backend/app/data/timezones-v1.txt" "$verification_dir/src/main/resources/"
 cp "$source_dir/test/java/com/habbittracker/reminders/AndroidAdapterTest.kt" "$verification_dir/src/test/java/com/habbittracker/reminders/"
 cp "$source_dir/main/AndroidManifest.xml" "$verification_dir/src/main/AndroidManifest.xml"
 cat > "$verification_dir/settings.gradle" <<'GRADLE'
