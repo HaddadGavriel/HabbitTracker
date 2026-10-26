@@ -1,4 +1,9 @@
-# Current release validation — 2026-10-25
+# Release validation — 2026-10-25
+
+The [2026-10-26 follow-up validation](release-evidence/2026-10-26-followup.md)
+records the later onboarding, profile-editing and fair-maintenance fixes, refreshed
+live configuration observations and remaining release gates. The results below
+are retained as historical evidence for PR #33, not results for the latest revision.
 
 **Release blocked.** Application regressions pass, but two Expo toolchain
 advisories, operational deletion-maintenance activation, signing access and

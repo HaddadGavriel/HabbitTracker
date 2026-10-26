@@ -1,5 +1,7 @@
 """Exercise Python profile writes and the production Java planner with identical IDs."""
 import base64
+from datetime import datetime, timezone
+import json
 from importlib.resources import files
 from pathlib import Path
 import shutil
@@ -81,3 +83,21 @@ def test_runtime_specific_names_offsets_and_malformed_ids_are_rejected_consisten
             ProfileCreate(username="owner", display_name="Owner", timezone=zone)
         with pytest.raises(ValidationError):
             ProfileUpdate(timezone=zone)
+
+
+def test_mobile_device_alias_suggestions_preserve_the_zone_and_validate_for_writes(native_validator):
+    aliases = json.loads((Path(__file__).resolve().parents[2] / 'mobile/lib/timezone-aliases.json').read_text())
+    assert native_validator(list(aliases.values())) == ['accepted'] * len(aliases)
+    for alias, target in aliases.items():
+        assert target in SUPPORTED_TIMEZONES
+        assert ProfileCreate(username='reviewer', display_name='Reviewer', timezone=target).timezone == target
+        # Compare pinned IANA transition tables, including historical and future
+        # offsets. No device-timezone or UTC substitution is permitted.
+        with files('tzdata.zoneinfo').joinpath(alias).open('rb') as source:
+            original = ZoneInfo.from_file(source, key=alias)
+        with files('tzdata.zoneinfo').joinpath(target).open('rb') as source:
+            suggested = ZoneInfo.from_file(source, key=target)
+        for year in [1970, 2000, 2026, 2030]:
+            for month in range(1, 13):
+                instant = datetime(year, month, 15, 12, tzinfo=timezone.utc)
+                assert instant.astimezone(original).utcoffset() == instant.astimezone(suggested).utcoffset()

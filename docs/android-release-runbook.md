@@ -12,11 +12,12 @@ release gates, not claimed results.
    two disposable accounts. Never use production credentials in automation.
 2. Review `supabase migration list`, then apply **every unapplied migration in filename
    order**, `202610050001_infrastructure_proof.sql` through
-   `20261025113327_excuse_owner_identity.sql` (16 files in this checkout). Use the
+   `20261026063642_fair_deletion_maintenance.sql` (17 files in this checkout). Use the
    same reviewed files as tested locally. Do not edit/reapply old migrations.
    The account-deletion migration wraps 31 service RPCs and fences deletion; the
-   latest migration adds authorized owner identity to excuse responses. Apply it
-   before the matching API/mobile release. Follow [deletion recovery](account-deletion.md).
+   owner-identity migration adds authorized public identity to excuse responses;
+   the last migration adds bounded, fair maintenance claims. Apply both before
+   the matching API/mobile/maintenance release. Follow [deletion recovery](account-deletion.md).
 3. Deploy matching FastAPI source to the existing Render service (`backend`, Python
    3.12, `pip install -r requirements.txt`, `uvicorn app.main:app --host 0.0.0.0 --port $PORT`).
    Check `/health`, then authenticated profile, Today and reminder-plan reads in
@@ -24,7 +25,12 @@ release gates, not claimed results.
    Separately validate and deploy the prepared deletion cron from `render.yaml`,
    verify its environment references and failure notifications, and record an
    empty run plus a staged pending-deletion recovery. Automatic code deployments
-   are off. The cron is not established operationally until those checks pass.
+   must be verified off in the live service settings before merging a green
+   release PR. `autoDeployTrigger: off` in a file does not change an existing
+   service until applied. On 2026-10-26 UTC the live service still reported main /
+   checksPass, and only the first 15 migrations were recorded. Enforce the
+   migration-before-API sequence before enabling or triggering deployment.
+   The cron is not established operationally until those checks pass.
 4. Configure staging callback/FCM settings, build the preview APK with the existing
    EAS project and signing key, install/update on two Android devices, and complete
    the acceptance checklist. Record APK SHA256, commit, EAS build ID, versionCode,

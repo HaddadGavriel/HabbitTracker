@@ -80,7 +80,7 @@ function settings() {
     '../components/form': { Field:'Field', Form:'Form', Message:'Message', styles:{} },
     '../components/notification-controls': { NotificationControls:'NotificationControls' },
     '../components/account-deletion-gate': { useAccountDeletion: () => ({ begin: async (...args) => calls.push(args) }) },
-    '../lib/api': { ApiError: class extends Error {} }, '../lib/profile-input': { profileInput:x=>x },
+    '../lib/api': { ApiError: class extends Error {} }, '../lib/profile-input': { profileUpdateInput:x=>x },
     '../lib/session': { useSession: () => ({ profile:{username:'alice',display_name:'Alice',timezone:'UTC'},session:{user:{id:'validated-user',email:'a@example.com'}},store:{} }) },
   };
   const Settings = compile('app/settings.tsx', name => { assert.ok(modules[name],name); return modules[name]; }).default;

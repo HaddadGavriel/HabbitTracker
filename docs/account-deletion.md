@@ -169,14 +169,25 @@ cd backend
 python -m app.deletion_maintenance --limit 100 --concurrency 4 --max-seconds 240
 ```
 
-This enumerates only durable pending requests through a service-only RPC, retries
-Auth delete/verification and completion, and prints aggregate JSON counts. It cannot
-start deletion for arbitrary accounts. At most 100 requests are selected, four
-Auth workflows run concurrently, and processing stops after 240 seconds; the
-ledger read also has the adapter's HTTP timeout. A timeout, unexpected error or
-remaining backlog makes the command exit nonzero. Lost responses and interrupted
-remote deletion remain recoverable on the next run. Logs contain no user IDs,
-receipts, passwords, tokens or exception bodies.
+Apply `20261026063642_fair_deletion_maintenance.sql` before deploying this command.
+It claims only durable pending requests through a service-only RPC, retries Auth
+delete/verification and completion, and prints aggregate JSON counts. It cannot
+start deletion for arbitrary accounts. Each claim selects only the next four
+requests that can start immediately. The database records attempt order and a
+five-minute lease; concurrent workers skip locked or leased requests. Older
+failing requests move behind unattempted requests, including across cron process
+restarts, so a persistent failure cannot monopolize every sweep. An interrupted
+claim becomes eligible again after its lease expires.
+
+The defaults attempt at most 100 requests with four concurrent Auth workflows.
+The 240-second budget includes claim and final-count database calls. Supported
+bounds are 1–1,000 requests, 1–16 concurrent workflows and 1–240 seconds; the time
+budget must stay below the lease duration. A timeout, unexpected error or remaining
+backlog makes the command exit nonzero. `pending` is the last observed count on a
+timeout, which can include work completed since that observation; it is `null`
+when no count could be read. Lost responses and interrupted remote deletion remain
+recoverable on the next run. Logs contain no user IDs, receipts, passwords, tokens
+or exception bodies.
 
 `render.yaml` prepares `habit-tracker-deletion-maintenance` every 15 minutes
 (`*/15 * * * *`, UTC), using the existing API service's Supabase variables through
@@ -187,7 +198,7 @@ Render platform validation and live activation remain release gates.
 
 The backend on-call owns this job. During rollout, enable failed-job notifications,
 record the job ID and a successful staging sweep, and check for missing runs after
-30 minutes or two consecutive nonzero exits. A nonzero exit with a large deferred
+30 minutes or two consecutive nonzero exits. A nonzero exit with a large pending
 backlog can require a reviewed limit/concurrency adjustment; do not assume every
 pending account will finish in one sweep. Rehearse a lost Auth DELETE response,
 retry to completion, an empty sweep, and a forced failure with aggregate-only logs.

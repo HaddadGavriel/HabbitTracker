@@ -8,34 +8,42 @@ from .services.account_deletion import AccountDeletion, AuthDeletionAdapter
 
 
 async def sweep(database, workflow, *, limit=100, concurrency=4, max_seconds=240):
-    pending = await database.deletion_rpc('pending_account_deletions', {})
+    # The database claim lasts five minutes. Finish/cancel this process's work
+    # before expiry; only claim a concurrency-sized batch, not queued work.
+    if not 1 <= limit <= 1000 or not 1 <= concurrency <= 16 or not 0 < max_seconds <= 240:
+        raise ValueError('invalid maintenance bounds')
     completed = attempted = errors = 0
-    selected = pending[:limit]
-    semaphore = asyncio.Semaphore(concurrency)
+    pending = None
 
     async def resume(user_id):
         nonlocal completed, attempted, errors
-        async with semaphore:
-            attempted += 1
-            try:
-                state = await workflow.resume_user(user_id)
-                completed += state == 'complete'
-            except Exception:
-                # One corrupt/transient request must not stop other authorized
-                # requests. Never print exceptions carrying HTTP credentials.
-                errors += 1
+        attempted += 1
+        try:
+            state = await workflow.resume_user(user_id)
+            completed += state == 'complete'
+        except Exception:
+            # One corrupt/transient request must not stop other authorized
+            # requests. Never print exceptions carrying HTTP credentials.
+            errors += 1
 
     timed_out = False
     try:
         async with asyncio.timeout(max_seconds):
-            await asyncio.gather(*(resume(user_id) for user_id in selected))
+            while attempted < limit:
+                batch = await database.deletion_rpc('claim_account_deletions',
+                    {'p_limit': min(concurrency, limit - attempted)})
+                pending = batch['pending_count']
+                selected = batch['user_ids']
+                if not selected:
+                    break
+                await asyncio.gather(*(resume(user_id) for user_id in selected))
+            pending = await database.deletion_rpc('account_deletion_pending_count', {})
     except TimeoutError:
         # Cancellation can follow a successful remote delete. The durable ledger
         # makes the next sweep confirm absence and safely finish that request.
         timed_out = True
     return {'event': 'deletion_maintenance', 'attempted': attempted, 'completed': completed,
-            'pending': len(pending) - completed, 'deferred': len(pending) - attempted,
-            'errors': errors, 'timed_out': timed_out}
+            'pending': pending, 'errors': errors, 'timed_out': timed_out}
 
 
 async def main(*, limit=100, concurrency=4, max_seconds=240):
@@ -50,7 +58,7 @@ async def main(*, limit=100, concurrency=4, max_seconds=240):
     # Aggregate counts only. A remaining backlog is a failed run for monitoring,
     # not a success merely because the process reached the end of its loop.
     print(json.dumps(result, sort_keys=True))
-    return int(result['pending'] > 0 or result['timed_out'] or result['errors'] > 0)
+    return int(result['pending'] is None or result['pending'] > 0 or result['timed_out'] or result['errors'] > 0)
 
 
 def positive_integer(value):
