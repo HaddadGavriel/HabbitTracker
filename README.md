@@ -1,5 +1,10 @@
 # Habit Tracker — Android MVP release candidate
 
+For private testing on your Android phones, follow the complete
+[installation walkthrough](docs/install-on-android-phones.md). It covers the
+separate Supabase/Render test environment, existing Expo/Firebase credentials,
+APK build, installation and the first two-phone test session.
+
 This repository contains authenticated profiles, exact username lookup, friendships, private habit tracking, selective habit sharing, occurrence excuses with friend decisions, owner occurrence history, current streaks, friend-triggered push reminders, and integrated Android local habit reminders. Settings includes profile/timezone updates, notification controls, sign-out and recoverable permanent account deletion. Support diagnostics are optional and disabled by default. Backend contracts and PowerShell walkthroughs are in [`docs/friendships.md`](docs/friendships.md), [`docs/habits.md`](docs/habits.md), [`docs/occurrences.md`](docs/occurrences.md), [`docs/sharing.md`](docs/sharing.md), [`docs/excuses.md`](docs/excuses.md), [`docs/history.md`](docs/history.md), and [`docs/reminders.md`](docs/reminders.md).
 
 The app opens on **Today**. **Menu** consistently reaches **My habits**, **Friends**,
