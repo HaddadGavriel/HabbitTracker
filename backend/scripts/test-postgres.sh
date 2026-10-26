@@ -4,7 +4,9 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
 container="habittracker-tests-$$"
-docker --host=unix:///var/run/docker.sock run -d --name "$container" -e POSTGRES_PASSWORD=disposable-only -p 127.0.0.1::5432 postgres:16 >/dev/null
+postgres_major=${POSTGRES_MAJOR:-16}
+[[ "$postgres_major" == 16 || "$postgres_major" == 17 ]] || { echo 'POSTGRES_MAJOR must be 16 or 17' >&2; exit 1; }
+docker --host=unix:///var/run/docker.sock run -d --name "$container" -e POSTGRES_PASSWORD=disposable-only -p 127.0.0.1::5432 "postgres:$postgres_major" >/dev/null
 trap 'docker --host=unix:///var/run/docker.sock rm -f "$container" >/dev/null' EXIT
 for attempt in {1..30}; do
   # Ignore the socket-only initialization server that PostgreSQL restarts.

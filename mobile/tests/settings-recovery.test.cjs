@@ -71,6 +71,21 @@ test('timezone save refreshes real Today and history stores and supersedes old d
   assert.equal(today.snapshot().today.timezone,'Asia/Tokyo'); assert.equal(todayReads,2); assert.equal(historyReads,2); assert.equal(streakReads,2);
   today.stop(); history.stop();
 });
+
+test('partial profile patches survive session renewal without adding legacy timezone fields', async () => {
+  const calls=[];
+  const x=sessions(async (s,patch)=>{
+    calls.push({token:s.access_token,patch:{...patch}});
+    if(s.access_token==='old') throw new ApiError('',401,'http_401');
+    return {...profile('a','Factory'),...patch};
+  });
+  x.api.readProfile=async()=>profile('a','Factory');
+  await x.store.start();
+  await x.store.update({display_name:'Changed'});
+  assert.deepEqual(calls,[{token:'old',patch:{display_name:'Changed'}},{token:'new',patch:{display_name:'Changed'}}]);
+  assert.equal(x.store.snapshot().profile.timezone,'Factory');
+  await assert.rejects(x.store.update({}),/No profile changes/);
+});
 const link = (type='recovery', hash='unused') => `${authRedirect}?token_hash=${hash}&type=${type}`;
 function recovery(current = undefined, behavior = {}) {
   let account = current, updates = [], verifications = [];

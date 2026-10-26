@@ -6,7 +6,7 @@ The app opens on **Today**. **Menu** consistently reaches **My habits**, **Frien
 **Friends’ habits**, **Pending decisions**, and **Settings**. This is a release
 candidate, not a claim of production/device verification. Start with the
 [release runbook](docs/android-release-runbook.md), [requirements checklist](docs/android-release-checklist.md)
-and [actual validation evidence](docs/android-release-validation.md).
+and [latest validation evidence](docs/release-evidence/2026-10-26-followup.md).
 
 Release remains blocked on two Expo toolchain advisories, live deletion-maintenance
 activation, an APK signed with the existing key, and physical-device acceptance.

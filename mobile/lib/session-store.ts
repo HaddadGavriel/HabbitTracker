@@ -1,11 +1,11 @@
 import type { Session, SupabaseClient } from '@supabase/supabase-js';
-import { ApiError, type ProfileCreate, type ProfileResult } from './api';
+import { ApiError, type ProfileCreate, type ProfileUpdate, type ProfileResult } from './api';
 
 type Status = 'startup' | 'loading' | 'signed_out' | 'profile_required' | 'ready' | 'failure';
 export type SessionState = { status: Status; session: Session | null; profile: ProfileResult | null; error: string | null };
 type Auth = Pick<SupabaseClient['auth'], 'getSession' | 'onAuthStateChange' | 'signOut' | 'refreshSession'>;
 type Notifications = { setSession(session: Session | null, cleanupSession?: Session | null): Promise<void> };
-type API = { updateProfile?(session: Session, input: ProfileCreate): Promise<ProfileResult>; readProfile(session: Session): Promise<ProfileResult>; createProfile(session: Session, input: ProfileCreate): Promise<ProfileResult> };
+type API = { updateProfile?(session: Session, input: ProfileUpdate): Promise<ProfileResult>; readProfile(session: Session): Promise<ProfileResult>; createProfile(session: Session, input: ProfileCreate): Promise<ProfileResult> };
 export function routeAccess(status: Status) {
   return { auth: status === 'signed_out', onboarding: status === 'profile_required', home: status === 'ready', pending: status === 'startup' || status === 'loading' || status === 'failure' };
 }
@@ -97,8 +97,9 @@ export class SessionStore {
     this.publish({ ...this.state, session: { ...this.state.session! }, profile });
     return true;
   };
-  update = async (input: ProfileCreate): Promise<boolean> => {
+  update = async (input: ProfileUpdate): Promise<boolean> => {
     if (this.saving) throw new Error('A save is already in progress.');
+    if (!Object.keys(input).length) throw new Error('No profile changes to save.');
     let session = this.state.session;
     if (!session || this.state.status !== 'ready' || !this.api.updateProfile) throw new Error('Sign in again before saving.');
     const identity = this.identity;

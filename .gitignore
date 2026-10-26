@@ -5,3 +5,4 @@ __pycache__/
 .venv/
 *.pyc
 mobile/google-services.json
+supabase/.temp/

@@ -9,6 +9,19 @@ Offsets such as `+05:00`, short IDs such as `EST`, OS-local names such as
 `localtime`, `posix/` and `right/` trees, and unsupported legacy aliases such as
 `US/Eastern` are rejected with HTTP 422. IDs are never trimmed or silently mapped.
 
+For the initial onboarding suggestion only, the mobile app maps 18 reviewed
+ICU/Intl aliases to equivalent supported identifiers, for example
+`Asia/Calcutta` → `Asia/Kolkata`, `Asia/Katmandu` → `Asia/Kathmandu`,
+`Europe/Kiev` → `Europe/Kyiv`, and `America/Godthab` → `America/Nuuk`.
+The user sees and can edit that suggestion before saving. Explicit form input,
+existing profiles and occurrence snapshots are never remapped. If detection
+fails the field is empty and requires a choice; UTC is not assumed.
+The mapping is in `mobile/lib/timezone-aliases.json`; tests verify its offset
+equivalence with pinned tzdata and target acceptance in Python and Java. The
+mobile test covers all zones exposed by the installed Intl runtime. PostgreSQL
+retains the original portable catalog, without requiring optional legacy packages.
+Physical Android variants still require release acceptance.
+
 The backend reads this catalog directly. Android packages the **same file** as a
 Java resource, and `TimezonePolicy` resolves it for every planner rule, including
 saved journal rules. Build from the repository checkout so the shared backend
@@ -23,6 +36,10 @@ stays visible when loading the account or editing another profile field, so its
 owner can open Settings and select a supported value. Changing the profile does
 not rewrite stored occurrence timezone, date, deadline or reminder snapshots.
 Reminder-plan responses preserve those original values too.
+
+Settings sends only fields edited since the last confirmed save/reload. An
+unchanged unsupported timezone is omitted from a name-only PATCH. Explicit
+timezone changes still pass the normal write validation; no-op saves send nothing.
 
 If a plan or persisted journal contains an unsupported timezone, Android pauses
 all local reminders for that installation and reports `unsupported_timezone`.

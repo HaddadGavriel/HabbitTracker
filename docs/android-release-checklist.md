@@ -1,7 +1,8 @@
 # Android MVP requirements → implementation
 
-Baseline: working tree based on `915333fb899a20e5a6ec01c23453ca4b037d13e6`,
-reviewed 2026-10-25. This includes uncommitted follow-up fixes, not a released build.
+Baseline: PR #33 (`1853140e9a04db22ee164a21246d9b5428c2f567`) plus the
+[2026-10-26 follow-up fixes and validation](release-evidence/2026-10-26-followup.md).
+This is not a released build.
 **Implemented/tested** refers to the isolated automation named below, not live
 production or physical-device verification. All device acceptance gates remain in
 the [runbook](android-release-runbook.md). Exact results: [validation](android-release-validation.md).
@@ -9,7 +10,7 @@ the [runbook](android-release-runbook.md). Exact results: [validation](android-r
 | Requirement | Implementation and evidence | Status |
 |---|---|---|
 | Authentication, confirmation, recovery | Auth form/email requests, strict callback parser, isolated recovery session, session guards; session/settings-recovery and Auth transport tests. Real email/cold links need staging devices. | Implemented/manual-verification-pending |
-| Profile/timezone settings | Shared 484-identifier Python/native/Postgres contract; legacy profiles remain readable, snapshots immutable, native unsupported plans pause safely; cross-runtime and recovery tests. | Implemented/tested |
+| Profile/timezone settings | Shared 484-identifier Python/native/Postgres contract with reviewed equivalent device-timezone suggestions; partial Settings edits preserve unchanged legacy zones, snapshots stay immutable, native unsupported plans pause safely; cross-runtime and recovery tests. | Implemented/tested |
 | Binary and target habits | Create/edit, immutable type, complete/undo/absolute progress; forms/store/API/SQL regressions. | Implemented/tested |
 | Daily/selected schedules, multiple reminders | Wrapping schedule controls, reminders input, versioned snapshots and native plan; field/input/plan/SQL tests. Actual alarm delivery pending. | Implemented/manual-verification-pending |
 | Archive/restore | Confirmed archive/restore, preserved history/grants, recipient hiding and resync; screen/store/SQL tests. | Implemented/tested |
@@ -23,7 +24,7 @@ the [runbook](android-release-runbook.md). Exact results: [validation](android-r
 | Notification lifecycle/navigation | Single app-level registration/token/tap listeners, account-keyed guarded routes, cold-link Today anchor, cleanup notices; lifecycle/tap/recovery regressions. Native delivery/taps pending. | Implemented/manual-verification-pending |
 | Sign-out | Settings confirmation, stale-account fences, local/remote cleanup and recovery; session/notification/deletion lifecycle tests. | Implemented/tested |
 | Account deletion | Password reauth, typed confirmation, durable receipt/retry, DB barriers/anonymized decisions; all deletion API/mobile/SQL suites pass. Real Auth deletion requires disposable staging acceptance. | Implemented/manual-verification-pending |
-| Deletion maintenance | Bounded, idempotent CLI and 15-minute Render cron configuration; aggregate failure logs and exit codes tested. Platform validation, deployment, staging sweep and failure notifications are not completed. | Prepared/activation-blocked |
+| Deletion maintenance | Bounded, idempotent CLI with durable fair claims, five-minute leases and 15-minute Render cron configuration; concurrency, restart, starvation, timeout and privilege regressions pass on PostgreSQL 16/17. Platform validation, deployment, staging sweep and failure notifications are not completed. | Prepared/activation-blocked |
 | Consistent navigation and branding | Today default, Menu on guarded screens, six primary destinations, native Back/Today fallback; Habit Tracker launcher, existing package/scheme/slug/EAS project preserved. Route/config regressions pass; installed navigation acceptance pending. | Implemented/manual-verification-pending |
 | Keyboard/safe areas/scroll/touch/text/accessibility | Android resize (no double keyboard avoidance), safe-area shell and standalone gates, scrollable cleanup notices, 48dp wrapping buttons/links, labeled multiline inputs, bounded wrapping choices, light native theme with explicit contrast. Shared UI regressions pass; small-display/TalkBack/font-scale device pass pending. | Implemented/manual-verification-pending |
 | Loading/empty/error/retry/offline consistency | Existing uncertainty/confirmation guards retained, error vs empty decisions corrected, explicit no-offline-write message, safe Auth/API failures and screen retry boundary. API/store regressions pass. | Implemented/tested |
