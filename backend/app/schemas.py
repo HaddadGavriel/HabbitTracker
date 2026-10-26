@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from .timezones import validate_timezone
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from uuid import UUID, uuid4
@@ -76,11 +76,7 @@ class ProfileFields(BaseModel):
     def valid_timezone(cls, value: str | None) -> str | None:
         if value is None:
             return value
-        try:
-            ZoneInfo(value)
-        except (ZoneInfoNotFoundError, ValueError) as exc:
-            raise ValueError("must be a valid IANA timezone") from exc
-        return value
+        return validate_timezone(value)
 
 
 class ProfileCreate(ProfileFields):
@@ -99,7 +95,12 @@ class ProfileUpdate(BaseModel):
     _valid_timezone = field_validator("timezone")(ProfileFields.valid_timezone.__func__)
 
 
-class ProfileResult(ProfileFields):
+class ProfileResult(BaseModel):
+    # Stored profiles may predate the write contract. Do not trap their owners
+    # behind response validation before they can load Settings and correct them.
+    username: str
+    display_name: str
+    timezone: str
     user_id: str
     created_at: datetime
     updated_at: datetime

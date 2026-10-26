@@ -94,6 +94,7 @@ async function request<T>(path: string, session: Session, init: RequestInit, res
 
 /** Backend normalizes username/display_name and validates the IANA timezone. */
 export type ProfileCreate = { username: string; display_name: string; timezone: string };
+export type ProfileUpdate = Partial<ProfileCreate>;
 export type ProfileResult = ProfileCreate & { user_id: string; created_at: string; updated_at: string };
 
 export const readProfile = (session: Session) =>
@@ -102,7 +103,7 @@ export const readProfile = (session: Session) =>
 export const createProfile = (session: Session, profile: ProfileCreate) =>
   request<ProfileResult>('/profiles/me', session, { method: 'POST', body: JSON.stringify(profile) });
 
-export const updateProfile = (session: Session, profile: ProfileCreate) =>
+export const updateProfile = (session: Session, profile: ProfileUpdate) =>
   request<ProfileResult>('/profiles/me', session, { method: 'PATCH', body: JSON.stringify(profile) });
 
 /** Search and relationships expose only this public identity, never full profiles. */
@@ -236,6 +237,7 @@ export type ExcuseResult = HistoryExcuse & {
   occurrence_id: string;
   habit_id: string;
   owner_id: string;
+  owner: PublicProfile;
   occurrence: OccurrenceResult;
 };
 

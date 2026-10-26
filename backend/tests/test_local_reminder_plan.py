@@ -50,6 +50,22 @@ def test_missing_profile():
         assert client.get('/local-reminder-plan').json()['detail']['code'] == 'profile_not_found'
 
 
+def test_legacy_profile_and_snapshot_zones_reach_native_unchanged_for_safe_pause():
+    legacy = deepcopy(PLAN) | {'timezone': 'Factory', 'effective': [{
+        'habit_id': OWNER, 'local_date': '2026-03-01', 'timezone': 'EST',
+        'closes_at': '2026-03-02T05:00:00Z', 'reminder_times': ['08:00'],
+    }]}
+    class Database:
+        async def get_local_reminder_plan(self, owner):
+            assert owner == OWNER
+            return legacy
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(id=OWNER)
+    app.dependency_overrides[get_database] = Database
+    with TestClient(app) as client:
+        response = client.get('/local-reminder-plan')
+        assert response.status_code == 200 and response.json() == legacy
+
+
 async def test_adapter_owner_and_service_credentials(monkeypatch):
     def handler(request):
         assert request.url.path == '/rest/v1/rpc/get_local_reminder_plan'

@@ -64,18 +64,28 @@ export class LocalReminderService {
   }
   setSession = async (state: SessionState): Promise<void> => {
     if (state.status === 'startup') return;
-    // During initial profile hydration, keep a matching persisted opt-in. Do
-    // not interpret the temporary loading screen as logout on every restart.
-    if (state.status === 'loading' && state.session && !this.session) {
+    // A retained session still identifies the owner when profile hydration is
+    // loading or temporarily fails. Preserve that owner's opt-in and cached
+    // native schedule, but fence new work until the profile is ready again.
+    // Explicit logout/deletion revoke through disable(), even during this pause.
+    if ((state.status === 'loading' || state.status === 'failure') && state.session) {
       this.authPending = true;
+      this.session = null;
+      this.accountEpoch++; this.acceptedSessions = new WeakSet();
+      this.pending = false;
       const owner = state.session.user.id, epoch = ++this.epoch; this.revision++;
+      this.publish({ busy: false, enabled: this.enabledOwner === owner, lastSuccess: null,
+        status: 'checking', message: 'Habit reminders will sync when your account is ready.' });
       try {
         await this.exclusive(async () => {
+          if (epoch !== this.epoch) return;
           await this.init();
           if (epoch !== this.epoch) return;
           if (this.enabledOwner !== owner) {
-            this.enabledOwner = null; await this.cancel(); await this.deps.saveEnabled(null);
+            this.enabledOwner = null;
+            try { await this.cancel(); } finally { await this.deps.saveEnabled(null); }
           }
+          if (epoch === this.epoch) this.publish({ enabled: this.enabledOwner === owner });
         });
       } catch { if (epoch === this.epoch) this.failed(); }
       return;
@@ -121,8 +131,9 @@ export class LocalReminderService {
     } catch { if (epoch === this.epoch) this.failed(); }
   };
   enable = async (): Promise<void> => {
-    const session = this.session, epoch = ++this.epoch; this.revision++;
+    const session = this.session;
     if (!session) return;
+    const epoch = ++this.epoch; this.revision++;
     try {
       await this.exclusive(async () => {
         await this.init(); if (epoch !== this.epoch) return;
@@ -228,6 +239,11 @@ export class LocalReminderService {
           if (result.status === 'permission_blocked') { await this.cancel(); this.publish({ status: 'denied', permission: 'denied', busy: false,
             nativeStatus: result.status, message: 'Habit reminders are blocked. Open system notification settings, allow the Habit reminders channel, then retry / resync.' }); return; }
           this.publish({ nativeStatus: result.status });
+          if (result.status === 'unsupported_timezone') {
+            this.publish({ status: 'error', busy: false, lastSuccess: null,
+              message: 'Habit reminders are paused because this device cannot use a profile or saved occurrence timezone. In Settings, choose a supported IANA timezone such as Asia/Jerusalem or UTC, then retry / resync. Existing occurrence dates and deadlines stay unchanged; reminders remain paused while an unsupported occurrence is still eligible. Updating Android may also restore timezone support.' });
+            return;
+          }
           if (!['scheduled_os_limited', 'inexact', 'idle'].includes(result.status)) throw new Error('Scheduling needs repair');
           this.publish({ status: 'scheduled', busy: false, lastSuccess: plan.server_time,
             message: result.status === 'idle' ? 'Reminders synced. No eligible upcoming reminders.'

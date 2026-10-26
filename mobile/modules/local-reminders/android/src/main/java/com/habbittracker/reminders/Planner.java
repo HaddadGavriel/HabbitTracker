@@ -16,7 +16,7 @@ public final class Planner {
                 String closes, Set<Integer> weekdays, String time) {
       this.owner = UUID.fromString(owner).toString();
       this.habit = UUID.fromString(habit).toString();
-      this.zone = ZoneId.of(zone);
+      this.zone = TimezonePolicy.resolve(zone);
       this.start = LocalDate.parse(start);
       this.onlyDate = onlyDate == null ? null : LocalDate.parse(onlyDate);
       this.closes = closes == null ? null : Instant.parse(closes);

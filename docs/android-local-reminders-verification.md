@@ -7,6 +7,15 @@ This checklist is a procedure, **not a record of completed device tests**. Recor
 PASS, FAIL, BLOCKED or NOT RUN for each scenario, the app commit, API level, device/OEM,
 profile timezone, server date, permission state, and observed times.
 
+For legacy timezone coverage, use isolated test data created before the stricter
+[timezone contract](timezone-contract.md). Confirm an unsupported profile still
+loads Settings and can be corrected. Reminders must show the timezone pause and
+cancel the old alarm/notification; background/restart must preserve that pause.
+An unsupported occurrence retains its original date/deadline after profile repair
+and stays paused until it is no longer eligible. A fresh supported plan resumes
+future reminders without replaying missed times. Also verify logout/account
+switching clears the pause together with the previous owner's schedule.
+
 ## Setup and evidence
 
 1. Sign in, finish profile onboarding, and choose **Enable habit reminders** in Settings. Read
@@ -47,6 +56,8 @@ profile timezone, server date, permission state, and observed times.
 | Reboot | Configure a future time, run `adb reboot`, unlock the device after boot, and wait without opening the app. | Boot restoration should re-arm persisted future work when Android permits. Record `clock_unverified` until a fresh authenticated plan; elapsed times are skipped, not replayed in a burst. No delivery is promised while powered off or before unlock. |
 | Force-stop | Separately run `adb shell am force-stop com.haddadgavriel.habittracker`, or Settings → Apps → Habit Tracker → Force stop. | Android stops alarms/work/receivers for the stopped package. No background delivery or reboot recovery is promised until the user explicitly launches the app. Relaunch, refresh and verify only future times resume. |
 | Doze/battery limits | Test a locked, idle device; record battery optimization and OEM restrictions. Optionally use Android's documented test-device idle commands. | Exact-alarm access does not remove allow-while-idle quotas; inexact work can be delayed further. A delayed scheduled batch may appear once. Recovery must not emit a burst for all missed times. Restore any test-only settings. |
+| Routine repair before a delayed alarm | In the isolated native test harness, advance the clock past two configured times, run status and periodic repair before the alarm callback, then deliver duplicate callbacks. | Repairs retain the overdue batch and one alarm without posting. The callback posts only the first due batch once, skips the other elapsed times, and arms the next future time. |
+| Explicit missed-backlog recovery | In the isolated native test harness, advance far beyond the stored cursor, then invoke boot/package-replacement recovery. | Recovery skips missed times without posting or draining a large backlog. Routine repair after recovery still preserves the next alarm if its callback is delayed. |
 | App upgrade | Install a compatible newer build without clearing data, then relaunch/refresh. | Existing journal and preference recover, no already consumed reminder replays, current account owns the schedule. |
 
 `am kill`, swiping Recents, process crashes, and Android **Force stop** are different
@@ -106,8 +117,8 @@ disabled. Always record the status **after** returning and refreshing.
 - Sign out and switch A → B during a delayed refresh/save. Verify A's late results
   cannot install reminders for B; A's scheduled and displayed local summary clear.
   Restart signed out and verify persisted A work is cancelled without needing a
-  screen visit. Verify account-deletion cleanup through the supported deletion hook
-  in a controlled test harness; this does not imply a deletion UI exists.
+  screen visit. Verify account-deletion cleanup through Settings with a disposable
+  staging account, including interrupted deletion and saved-receipt recovery.
 - Tap a foreground/background/cold-start local notification, an old notification
   after account switching, and a repeated tap. Navigation must await current auth
   and onboarding, validate the owner, fetch current Today, deduplicate handling,

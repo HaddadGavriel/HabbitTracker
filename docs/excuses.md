@@ -44,6 +44,7 @@ Each success returns this shape; the nested occurrence uses the full
 | --- | --- |
 | `id` | Stable excuse UUID; use this for decisions |
 | `occurrence_id`, `habit_id`, `owner_id` | Associated occurrence, habit, and owning profile UUIDs |
+| `owner` | Current public profile: `user_id` (matching `owner_id`), `display_name`, and `username`; no private profile settings |
 | `explanation` | Trimmed explanation, preserved after any decision |
 | `status` | `pending`, `approved`, or `rejected` |
 | `decision_source` | null while pending; `automatic` for an unshared approval; `friend` for a friend decision |
@@ -172,10 +173,11 @@ occurrence states/guards without rewriting applied migrations. Constraints and
 foreign keys enforce one excuse per occurrence, valid explanation/decision data,
 and consistent actor/decision metadata. Excuses are not deleted by friendship or
 share removal. Decision data remains durable after those permission changes.
-The deciding-user foreign key also prevents deleting that profile while another
-owner's retained excuse still references it. Deleting an occurrence cascades its
-excuse. There is no profile/account deletion endpoint in this milestone; a future
-deletion feature must explicitly handle this audit-retention policy.
+The deciding-user foreign key prevents uncoordinated profile deletion while
+another owner's retained excuse references it. The later
+[account-deletion workflow](account-deletion.md) anonymizes those decisions as
+`deleted_friend` with a null deciding user before deleting Auth; outcome,
+explanation and timestamps remain intact. Deleting an occurrence cascades its excuse.
 
 Submission, current-permission checks, and occurrence transitions execute in one
 database transaction through backend-only Supabase RPCs. Operations acquire the

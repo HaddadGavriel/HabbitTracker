@@ -35,11 +35,13 @@ Cancellation uses the native queue without waiting for an old account's HTTP rea
 Confirmed mutations from a token renewed within the same uninterrupted account
 session are accepted, but results from before sign-out or A→B→A are ignored.
 
-Initial Auth/profile hydration preserves a matching persisted preference. Startup
-foreground events wait for authentication rather than interpreting a loading screen
-as logout. Preference hydration failures cancel unknown native ownership. A durable
-native cancellation tombstone prevents stale preference storage from re-enabling
-reminders after a failed preference removal.
+Initial Auth/profile hydration and transient profile failures preserve a matching
+owner's persisted preference and native schedule. Foreground polling and new
+scheduling wait for a ready profile; recovery resumes reconciliation without a new
+opt-in. A missing session, missing profile, account replacement, explicit sign-out,
+or account deletion still revokes local reminders. Preference hydration failures
+cancel unknown native ownership. A durable native cancellation tombstone prevents
+stale preference storage from re-enabling reminders after a failed removal.
 
 Sign-out, account replacement, and **Disable habit reminders** clear native alarms,
 repair work, and the presented local summary. **Disable notifications** clears both
@@ -47,9 +49,9 @@ local and remote notification state. Permission/channel revocation is observed o
 app refresh or native repair/alarm activity and clears local scheduled/presented
 work. Android itself blocks presentation immediately when permission is revoked.
 Remote unregister failures remain separately visible. Local cleanup failures remain
-visible even after sign-out, with a retry button. `beforeAccountDeletion()` provides
-a cleanup hook that must succeed before a future deletion flow removes credentials;
-this repository currently has no account-deletion screen or endpoint.
+visible even after sign-out, with a retry button. The Settings
+[account-deletion flow](account-deletion.md) uses `beforeAccountDeletion()` to
+confirm local cleanup before removing credentials, with owner/session fences.
 
 ## Authoritative plan and snapshot policy
 
@@ -84,6 +86,12 @@ phone timezone. DST gaps shift by the gap duration; overlaps use the earlier off
 once. Entirely skipped civil dates are skipped. Effective times must precede their
 original deadline.
 
+Profile writes and the native planner share the [timezone identifier contract](timezone-contract.md).
+Existing unsupported profiles remain readable and correctable. An unsupported
+profile, snapshot or saved journal pauses native scheduling with an explicit
+Settings message, preserving the raw data until a fresh supported plan can
+recover without replay. The engine never substitutes a device timezone or UTC.
+
 The native journal stores owner, lease, validated plan, clock anchor, recurrence
 cursor, suppression exclusions and presentation counters atomically in
 `noBackupFilesDir`. It stores no credentials or push tokens. One stable alarm and
@@ -100,14 +108,20 @@ retaining other future dates. Only a new authoritative reconciliation removes th
 exclusion. Stale reads started before a local confirmation cannot replace it.
 
 A real delayed alarm may present its first due batch once; other elapsed batches
-are skipped. Boot, package replacement, clock/timezone broadcasts, WorkManager
-repair, status checks and process recovery skip missed times without presenting a
-catch-up burst. The cursor/count commits before presentation. Recovery discards an
-ambiguous presentation outbox instead of reposting it, so a crash at that boundary
-can lose that reminder. Future reminders remain recoverable. No exactly-once phone
-delivery guarantee is made. Alarm/persistence failures report `repair_required` and
-remain retryable. Repeated refreshes/restarts neither accumulate alarms nor replay
-elapsed events.
+are skipped. Routine WorkManager repair, status checks and clock/timezone or exact
+alarm permission broadcasts preserve the unconsumed batch and re-arm the single
+alarm, even when overdue. They never present notifications themselves. Boot and
+package-replacement recovery explicitly skip missed backlog in one pass. Observed
+notification denial durably requests the same recovery when permission returns,
+so blocked-period reminders do not become a catch-up burst.
+
+The cursor/count commits before presentation. Routine repair and recovery discard
+an ambiguous, already-counted presentation outbox instead of reposting it; routine
+repair still retains the next unconsumed batch. A crash at that boundary can lose
+the counted reminder. No exactly-once phone delivery guarantee is made.
+Alarm/persistence failures report `repair_required` and remain retryable. Repeated
+repairs and duplicate alarm callbacks neither accumulate alarms nor replay consumed
+events. Fresh authoritative reconciliation still starts only at future times.
 
 The older foundation `replace` API and its backlog tests remain for compatibility;
 product code does not call it. Its historical catch-up policy is **not** the policy
@@ -167,7 +181,8 @@ taps; offline/unauthorized reads fall back safely. Payload URLs never choose rou
   restart, capacity and injected-failure regressions.
 - The native workflow generates a nonproduction Expo Android project and runs the
   production adapter tests both independently and through the full Expo module.
-  It checks the AAR contains `LocalRemindersModule.class` and uploads test reports.
+  It checks the AAR contains `LocalRemindersModule.class` and the exact shared
+  timezone catalog, and uploads test reports.
 - Backend PostgreSQL tests apply every migration only to a disposable database with
   `backend/tests/postgres_scaffold.sql`; never run them against a shared database.
 - `bash scripts/capture-local-reminder-device.sh --help` describes the read-only

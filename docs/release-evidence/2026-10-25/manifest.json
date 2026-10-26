@@ -1,0 +1,88 @@
+{
+  "recorded_at": "2026-10-25T23:44:19.113926+02:00",
+  "base_commit": "915333fb899a20e5a6ec01c23453ca4b037d13e6",
+  "source_state": "Uncommitted working tree at evidence collection; source hashes below do not imply a release commit.",
+  "source_sha256": {
+    "mobile/package.json": "7f4fdb1da44e4abb34433586dbc13eb57374e150e50018282feb80d5fc1b46d2",
+    "mobile/package-lock.json": "e14b3908268e87c930a21a81868b003b4bc003a7ab7f827fdd5b8d9cf579bfd8",
+    "backend/requirements.txt": "06893e23aac7675969cacd749c6c405dec36f87bc607f55035b5bcd5dd87ba15",
+    "backend/requirements-dev.txt": "97f6c4de540107a5593177a66f9c9e5cfff1f72090e5dbc5482ba39871f0e228",
+    "render.yaml": "010e15da9ed4e2f64ecc17dde2e65ede6282fffe362e97d39df437df65b27096",
+    "backend/app/deletion_maintenance.py": "61f5a885e6211879780292dafb99d4cc30944198960c6fc93c14abb40f82d09e",
+    "mobile/vendor/decode-uri-component/index.cjs": "af518852888a552ad08a0f2ea2ed8a0ff0b00cb8a7d16929238eac4cea643768",
+    "backend/app/data/timezones-v1.txt": "35f79334fb69434e75d7a11a91d61153aeb4b966e72b00e5c2a5ae2d7bccb895",
+    "mobile/app.config.ts": "e80c3126580d27281287bfdd16c861dd486c3d16c88aa5737f33a0c992b65d6b",
+    "mobile/modules/local-reminders/android/src/main/java/com/habbittracker/reminders/Engine.kt": "146ec52634bf89885a61076d5af97d790edb3ebd2466c36fdb6424febca76901",
+    "mobile/modules/local-reminders/android/src/main/java/com/habbittracker/reminders/Journal.java": "d5acc6a192f932d583640a01d2b2cb1d4c55305b74ee2ea2b19f0ab9f4ea5df2",
+    "mobile/modules/local-reminders/android/src/main/java/com/habbittracker/reminders/Planner.java": "f1b482adbf6a85991f50930649a0cd47b46e08674551f97196942fa32a51f372",
+    "mobile/modules/local-reminders/android/src/main/java/com/habbittracker/reminders/TimezonePolicy.java": "d58d2a0b8bfec3d58515d5e28e091df693f12835c0d5303d866253b6b2b37f9e",
+    "backend/scripts/test-postgres.sh": "2b096136c02ebf3bf2bb804c443d6690b955ed8ca1c8d5ea485b6a3ea46dab59",
+    "mobile/e2e/stack.py": "9a269ca5230e69f3b7e4eef43fe964ab0a20c91988168a81c8fc5359783405e6",
+    ".github/workflows/dependency-audit.yml": "d9fae137051c08287a767521d503074533c99f6f4e7c635405c0d55d06fe999f",
+    "mobile/vendor/decode-uri-component/package.json": "97d45c142bdf14ca0c57cb61279c0d9aa5d1939cbfcfb63d9b9a344126929e2b"
+  },
+  "android_js_bundle": {
+    "status": "PASS",
+    "scope": "Hermes bundle only; loopback fixture configuration; not an APK or release artifact",
+    "name": "entry-02ea575c2c5acbcb55f7ea0d1eb2826b.hbc",
+    "bytes": 3947544,
+    "sha256": "309b9309f546a05ffd4f90b48bf63bd1e435a1ef23812eb2a039dcba7b0c57f7"
+  },
+  "signed_apk": {
+    "status": "BLOCKED",
+    "artifact": null,
+    "eas_cli": "25.3.0",
+    "identity_check": "Not logged in",
+    "missing": [
+      "Existing signing credential access",
+      "Real Firebase client configuration",
+      "Release public environment configuration"
+    ]
+  },
+  "device_acceptance": {
+    "status": "BLOCKED",
+    "adb_output": "List of devices attached (empty)",
+    "capture_result": "error: no devices/emulators found",
+    "kvm_present": false,
+    "physical_device_evidence": null
+  },
+  "maintenance": {
+    "status": "PREPARED_NOT_DEPLOYED",
+    "schedule_utc": "*/15 * * * *",
+    "automatic_deploys": "off",
+    "local_configuration_check": "PASS: YAML parse, command bounds and service env references",
+    "platform_validation": "BLOCKED: Render docs/schema endpoints returned HTTP 403; connector has no selected workspace",
+    "live_sweep": "NOT RUN: no configured Supabase server credentials"
+  },
+  "deployment": "NOT RUN: user explicitly prohibited auto-deploy; no shared migrations, Blueprint sync or service changes performed",
+  "automated_checks": {
+    "mobile": {
+      "passed": 731,
+      "failed": 0,
+      "skipped": 0
+    },
+    "backend_postgres": {
+      "passed": 1733,
+      "failed": 0,
+      "migrations": 16
+    },
+    "typescript": "PASS",
+    "python_requirements_audit": "PASS: zero known advisories",
+    "npm_audit": "BLOCKED: 5 high vulnerable packages from 2 underlying advisories",
+    "npm10_clean_install": "PASS",
+    "npm11_lock_compatibility": "PASS",
+    "local_http_postgrest": "PASS: real local HTTP/API/PostgREST/PostgreSQL, fixture Auth and fake pushes only",
+    "diff_check": "PASS",
+    "node_runtime": "24.19.0; npm 10.9.4 clean install and npm 11.9.0 lock compatibility verified"
+  },
+  "native_engine": {
+    "tests": "39",
+    "skipped": "0",
+    "failures": "0",
+    "errors": "0",
+    "time": "19.127",
+    "scope": "Isolated production reminder engine; before JS/Python dependency-only changes; not Expo bridge/APK/device verification",
+    "aar_sha256": "b11aef246fa913e67a7e84907538d83a49a720c711fe50e55e928d4385951de2",
+    "timestamp_utc": "2026-10-25T16:37:57.862Z"
+  }
+}

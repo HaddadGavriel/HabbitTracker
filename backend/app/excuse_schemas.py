@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 
 from .occurrence_schemas import OccurrenceResult
+from .schemas import PublicProfile
 
 
 class ExcuseSubmission(BaseModel):
@@ -34,6 +35,7 @@ class ExcuseResult(BaseModel):
     occurrence_id: UUID
     habit_id: UUID
     owner_id: UUID
+    owner: PublicProfile
     explanation: str
     status: Literal["pending", "approved", "rejected"]
     decision_source: Literal["automatic", "friend", "deleted_friend"] | None

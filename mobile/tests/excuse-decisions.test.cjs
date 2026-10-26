@@ -30,6 +30,7 @@ function deferred() {
 }
 function excuse(status = 'pending', changes = {}) {
   return { id: 'excuse-1', occurrence_id: 'occurrence-1', habit_id: 'habit-1', owner_id: 'owner',
+    owner: { user_id: 'owner', display_name: 'Alex Rivera', username: 'alex_reads' },
     explanation: 'Recovering from an injury', status, decision_source: status === 'pending' ? null : 'friend',
     decided_at: status === 'pending' ? null : '2026-10-19T10:00:00Z', decided_by: status === 'pending' ? null : 'friend',
     created_at: '2026-10-17T10:00:00Z', occurrence: { id: 'occurrence-1', habit_id: 'habit-1', owner_id: 'owner',
@@ -232,6 +233,29 @@ for (const invalid of ['own', 'decided', 'duplicate', 'wrong-occurrence']) {
     assert.equal(x.store.snapshot().excuses.length, 0);
     assert.equal(x.store.canDecide(), false);
     assert.match(x.store.snapshot().error, /Unable to load/);
+  });
+}
+
+for (const [label, owner] of [
+  ['missing', undefined], ['null', null],
+  ['another owner', { user_id: 'someone-else', display_name: 'Alex Rivera', username: 'alex_reads' }],
+  ['missing display name', { user_id: 'owner', username: 'alex_reads' }],
+  ['blank display name', { user_id: 'owner', display_name: ' ', username: 'alex_reads' }],
+  ['missing username', { user_id: 'owner', display_name: 'Alex Rivera' }],
+  ['blank username', { user_id: 'owner', display_name: 'Alex Rivera', username: ' ' }],
+]) {
+  test(`pending refresh with ${label} identity clears the previous owner and confirmation`, async () => {
+    let row = excuse();
+    const x = await setup({ list: async () => [row] });
+    const confirmation = confirm(x.store);
+    row = { ...row, owner };
+    await x.store.refresh();
+    assert.equal(x.store.snapshot().excuses.length, 0);
+    assert.equal(x.store.snapshot().confirmation, null);
+    assert.equal(x.store.canDecide(), false);
+    assert.match(x.store.snapshot().error, /Unable to load/);
+    await x.store.confirmDecision(confirmation);
+    assert.equal(x.calls.decide.length, 0);
   });
 }
 

@@ -84,16 +84,26 @@ production APIs accept no client clock override.
 1. As Bob, open **Home → Pending excuse decisions**. The list contains only currently
    actionable submissions, ordered by the server, including dates older than
    today. Alice's own pending submissions must not become self-approvable. Inspect
-   an entry and check its stored habit name, occurrence date/timezone, partial
+   an entry and check the owner's display name and `@username`, stored habit name, occurrence date/timezone, partial
    progress and explanation. Current edited habit settings must not replace
    those occurrence snapshots.
 2. Choose **Approve excuse** or **Reject excuse**. Each requires explicit confirmation that the
-   first valid decision is final. Cancel performs no request. Approval produces
+   first valid decision is final. The confirmation names the owner by display
+   name and `@username`, plus the stored habit name and occurrence date. Cancel performs no request. Approval produces
    **approved / friend / excused**; rejection produces
    **rejected / friend / missed**, with deciding user and server timestamp. Show
    success only for a confirmed result. Neither decision offers undo, editing or
    another decision; the owner's ordinary controls remain locked even if the
    friend rejected before midnight. Partial progress remains visible.
+   Repeat with two friends sharing identically named habits for the same date,
+   including friends with the same display name but different usernames. Each
+   row and final result must identify the correct owner. With TalkBack, verify
+   Approve, Reject, Confirm and Cancel labels include that owner's display name,
+   username, habit and date; Confirm also says the decision is permanent. Decide
+   the second friend's excuse and verify only that excuse changes. On revocation,
+   backgrounding or account switching, the old identity and controls must clear
+   with the explanation. Apply the `excuse_owner_identity` migration before the
+   API/mobile release: missing or inconsistent owner identity blocks decisions.
 3. Leave another pending excuse past the owner's midnight. Reopen Pending
    excuse decisions and decide it successfully; the original submission deadline is
    not a decision deadline. Return as Alice to Today, history and streaks, and as

@@ -1,9 +1,10 @@
 import { Text, View } from 'react-native';
-import type { HistoryExcuse, OccurrenceResult } from '../lib/api';
+import type { HistoryExcuse, OccurrenceResult, PublicProfile } from '../lib/api';
 import { styles } from './form';
 
-export function ExcuseView({ excuse, occurrence }: { excuse: HistoryExcuse; occurrence?: OccurrenceResult }) {
+export function ExcuseView({ excuse, occurrence, owner }: { excuse: HistoryExcuse; occurrence?: OccurrenceResult; owner?: PublicProfile }) {
   return <View style={{ gap: 8 }}>
+    {owner && <Text style={styles.label}>{owner.display_name} (@{owner.username})</Text>}
     {occurrence && <>
       <Text accessibilityRole="header" style={styles.label}>{occurrence.snapshot.name} · {occurrence.local_date}</Text>
       <Text style={styles.message}>Timezone: {occurrence.timezone}</Text>
