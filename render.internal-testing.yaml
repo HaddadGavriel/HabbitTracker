@@ -1,0 +1,26 @@
+# Separate Blueprint for a NEW service. Never sync the production render.yaml.
+services:
+  - type: web
+    name: habit-tracker-pr33-internal
+    runtime: python
+    plan: free
+    region: singapore
+    repo: https://github.com/HaddadGavriel/HabbitTracker
+    branch: codex/internal-testing-preparation
+    autoDeployTrigger: "off"
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: python scripts/internal-testing/start-api.py
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.12
+      - key: ENABLE_DIAGNOSTICS
+        value: "false"
+      - key: INTERNAL_TESTING_SUPABASE_REF
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
