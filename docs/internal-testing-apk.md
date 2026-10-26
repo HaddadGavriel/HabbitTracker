@@ -1,7 +1,13 @@
 # PR #33 internal-testing APK preparation
 
 Source base: `f5df2a7e371a7246d87e8a9a25b8633885d57c5a` from PR #33.
-Preparation branch: `codex/internal-testing-preparation`.
+Preparation PR: #35. After merging it into #33, use
+`codex/release-hardening-and-evidence` for both the test API and APK.
+
+For the complete Dashboard/terminal/phone walkthrough, use
+[Install on two Android phones](install-on-android-phones.md). That guide includes
+interactive EAS login on your own computer, a separate Supabase test project,
+confirmed test accounts, the precise environment variables and troubleshooting.
 
 **No APK or EAS build URL has been produced yet.** This preparation is for the
 user-authorized internal test, with physical-device acceptance after installation.
@@ -9,7 +15,14 @@ It does not certify production readiness or clear the dependency advisories.
 The production branch, Render service, Supabase database, signing credentials and
 dependency-audit workflow have not been changed.
 
-## Confirmed access blockers
+## Original preparation-session access blockers
+
+These observations describe the earlier Codex session, not missing permissions on
+your own computer. This review session can access the already-confirmed Render
+workspace; production auto-deploy is off. Interactive `eas login` on your computer
+does not require an `EXPO_TOKEN`. An independent Supabase test project also works;
+a paid development branch is not a requirement. Review the Dashboard's actual
+plan/cost before creating any new resource.
 
 - EAS CLI 26.0.0 `whoami` returns **Not logged in**. The runtime has no `EXPO_TOKEN`.
   Configure it through secure workspace settings for an account authorized on EAS
@@ -45,15 +58,16 @@ auto-submits to a store. The Android package remains
 
 ## Isolated backend setup
 
-1. Select the intended Render workspace and Supabase organization. Obtain the
-   branch cost through Supabase and confirm it before creation. Create a fresh
-   development branch, without copying production data. Record its new ref.
+1. Use the confirmed Render workspace `My Workspace` and Supabase organization
+   `haddadgavrielorg`. Create an empty independent test project (or a development
+   branch), without copying production data. Review its actual cost before
+   creation and record its new ref.
 2. Inspect the branch's migration history. Apply only missing, reviewed migrations
    in order, through `20261026063642_fair_deletion_maintenance.sql` (17 total).
    All changes must use the **new branch ref**, never `zsqzenswefkjaundwyct`.
 3. Supply the new branch URL, publishable key and server secret to a **new** Render
    service named `habit-tracker-pr33-internal`. The separate
-   `render.internal-testing.yaml` defines the source branch, disabled auto-deploy,
+   `render.internal-testing.yaml` defines the consolidated source branch, disabled auto-deploy,
    and startup guard. It contains no production references or inherited secrets.
    Do not sync the existing production `render.yaml`. The proposed free service
    can sleep between requests; a first request may require a cold start.
@@ -61,7 +75,7 @@ auto-submits to a store. The Android package remains
    using authenticated Render access. YAML/isolation checks passed locally;
    platform validation is pending. The workspace cannot fetch Render's schema
    endpoint (HTTP 403). The current Blueprint field documentation was checked.
-5. Deploy that preparation branch and record the deployed commit. Check `/health`
+5. Deploy `codex/release-hardening-and-evidence` after #35 is merged and record the deployed commit. Check `/health`
    and authenticated profile, Today and reminder-plan reads using disposable
    accounts. `/health` alone does not prove database/Auth compatibility. Match
    the backend source commit to the mobile build source. Never deploy the
@@ -87,7 +101,7 @@ Configure the values listed in `mobile/internal-testing.env.example` in the
 variable. Never place the backend server secret in any mobile/EAS public variable.
 Production EAS environment variables are not modified.
 
-From a full repository checkout on the preparation branch (the native module also
+From a full repository checkout on the consolidated release branch (the native module also
 packages the shared catalog from `backend/app/data`):
 
 ```bash

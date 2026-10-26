@@ -6,7 +6,7 @@ services:
     plan: free
     region: singapore
     repo: https://github.com/HaddadGavriel/HabbitTracker
-    branch: codex/internal-testing-preparation
+    branch: codex/release-hardening-and-evidence
     autoDeployTrigger: "off"
     buildCommand: pip install -r backend/requirements.txt
     startCommand: python scripts/internal-testing/start-api.py
