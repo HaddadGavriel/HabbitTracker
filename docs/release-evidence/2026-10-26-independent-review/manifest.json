@@ -14,7 +14,7 @@
   },
   "artifact_sha256": {
     "automated-checks.txt": "b9c72e0d20db2b6781994740e62b2ff97082e7bff63e644e8ef4bf50e4ea24b6",
-    "dependency-paths.txt": "cb3e343a9edee956ffe7c4a05b39e12ae71ab1f8c79c27ca0548419c15cde3f3",
+    "dependency-paths.txt": "3f98c9b1477d907dde650ec432fcfdf5c36620bc57a3667d0362a9740c4f17e9",
     "dependency-probes.cjs": "81f4bf5d186f9bf17b5e4172e8737585509fcbbbcc096f8ad7129b931b3f687d",
     "forge-reproduction.txt": "a29ef7f240b5c82115a8eb0d7a0d61383bc77c8d2ed7732b72731dd3a00a820d",
     "npm-audit.json": "a179ee2ce58f615d2e60096537f9f6bdfc9efd49253329384c205f4cf75cb0d8",

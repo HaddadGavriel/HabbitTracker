@@ -60,4 +60,3 @@ habit-tracker-infrastructure-proof@0.1.0 /workspace/work/pr34-review/mobile
   │ └── expo@57.0.31 deduped
   └─┬ expo-keep-awake@57.0.2
     └── expo@57.0.31 deduped
-
