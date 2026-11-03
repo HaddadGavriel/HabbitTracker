@@ -68,7 +68,7 @@ test('partial input validates changed fields and never normalizes an unchanged l
 });
 
 test('actual onboarding suggestions from Intl belong to the backend/native catalog',()=>{
-  const catalog=new Set(readFileSync(`${__dirname}/../../backend/app/data/timezones-v1.txt`,'utf8').split('\n'));
+  const catalog=new Set(readFileSync(`${__dirname}/../../backend/app/data/timezones-v1.txt`,'utf8').split(/\r?\n/));
   const source=readFileSync(`${__dirname}/../lib/timezone-suggestion.ts`,'utf8');
   const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText;
   const aliases=require('../lib/timezone-aliases.json');

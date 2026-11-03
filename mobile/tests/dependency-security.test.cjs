@@ -7,7 +7,7 @@ const decoderPath = require.resolve('decode-uri-component', { paths: [dirname(re
 const decode = require(decoderPath);
 
 test('Expo Router query parser uses the fixed CommonJS decoder without changing URL semantics', () => {
-  assert.ok(decoderPath.includes('vendor/decode-uri-component'), decoderPath);
+  assert.equal(decoderPath, require.resolve('../vendor/decode-uri-component'));
   assert.deepEqual({ ...query.parse('name=%D7%A9%D7%9C%D7%95%D7%9D&word=one+two&tag=a&tag=b') },
     { name: 'שלום', word: 'one two', tag: ['a', 'b'] });
   assert.equal(decode('one+two'), 'one two');
