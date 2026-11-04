@@ -8,7 +8,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   orientation: "portrait",
   userInterfaceStyle: "light",
   scheme: "habittrackerinfra",
-  plugins: ["expo-router", ["expo-notifications", { defaultChannel: "friend-reminders" }]],
+  plugins: [
+    "expo-router",
+    ["expo-notifications", { defaultChannel: "friend-reminders" }],
+    "./plugins/with-core-library-desugaring.cjs",
+  ],
   android: {
     package: "com.haddadgavriel.habittracker",
     softwareKeyboardLayoutMode: "resize",
