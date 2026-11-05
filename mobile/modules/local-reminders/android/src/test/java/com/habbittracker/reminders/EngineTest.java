@@ -103,7 +103,7 @@ public class EngineTest {
   static void routineRepairPreservesDelayedAlarm(Planner.Rule a, Planner.Rule b) {
     Fake p = new Fake();
     p.state = new Journal.State("lease", List.of(a, a, b), at("00:00"));
-    for (int i = 0; i < 3; i++) new Journal(p).repairFutureOnly();
+    for (int i = 0; i < 3; i++) new Journal(p).repairFutureOnly(at("09:05"));
     eq(p.state.cursor, at("00:00")); eq(p.state.total, 0L);
     eq(p.armed, at("08:00")); eq(p.presentations.size(), 0);
     new Journal(p).deliverFutureOnly(at("09:05"));
@@ -112,7 +112,7 @@ public class EngineTest {
     eq(p.armed, Instant.parse("2026-10-22T08:00:00Z"));
     // Repeated repairs and already-queued duplicate alarm callbacks cannot replay.
     for (int i = 0; i < 3; i++) {
-      new Journal(p).repairFutureOnly();
+      new Journal(p).repairFutureOnly(at("09:05"));
       new Journal(p).deliverFutureOnly(at("09:05"));
     }
     eq(p.state.total, 1L); eq(p.presentations.size(), 1); eq(p.presentationCalls, 1);
@@ -120,34 +120,35 @@ public class EngineTest {
   static void productRecoveryAndFailures(Planner.Rule a, Planner.Rule b) {
     Fake p = new Fake(); Journal j = new Journal(p);
     p.state = new Journal.State("lease", List.of(a, b), at("00:00"));
-    // Foreground refresh skips the elapsed reminder and arms only the future one.
+    // Foreground refresh retains an existing recent reminder until its alarm runs.
     p.state = Journal.reconcile(p.state, "lease", List.of(a, b), at("08:05"));
-    j.repairFutureOnly();
-    eq(p.state.total, 0L); eq(p.armed, at("09:00")); eq(p.presentations.size(), 0);
+    j.repairFutureOnly(at("08:05"));
+    eq(p.state.total, 0L); eq(p.armed, at("08:00")); eq(p.presentations.size(), 0);
     // An alarm delayed beyond two times displays one batch, never a catch-up burst.
     p.state = new Journal.State("lease", List.of(a, b), at("00:00"));
     j.deliverFutureOnly(at("09:05"));
     eq(p.state.total, 1L); eq(p.presentations.size(), 1);
     eq(p.armed, Instant.parse("2026-10-22T08:00:00Z"));
-    new Journal(p).repairFutureOnly();
+    new Journal(p).repairFutureOnly(at("09:05"));
     eq(p.state.total, 1L); eq(p.presentations.size(), 1);
     // Suppression/reconciliation removes current snapshots and acknowledges the
     // shared presentation while retaining tomorrow's rules; no old backlog survives.
     p.state = Journal.reconcile(p.state, "lease", List.of(rule("UTC", "2026-10-22", "08:00", Set.of())), at("09:06"));
     eq(p.state.acknowledged, 1L); eq(p.state.backlog.size(), 0);
     eq(p.state.pending.get(0).instant, Instant.parse("2026-10-22T08:00:00Z"));
-    // A crash after posting but before acknowledgement must not post twice on restart.
+    // A known presentation failure retries the same counted batch and arms work.
     p.state = new Journal.State("lease", List.of(a, b), at("00:00"));
-    p.presentations.clear(); p.failAfterPresentation = true;
+    p.presentations.clear(); p.failPresent = true;
     fails(() -> j.deliverFutureOnly(at("08:00")));
     eq(p.state.total, 1L); eq(p.state.presentationPending, true);
-    p.failAfterPresentation = false; p.failSave = false;
-    new Journal(p).repairFutureOnly();
+    eq(p.armed, at("08:01"));
+    p.failPresent = false;
+    new Journal(p).repairFutureOnly(at("08:01"));
     eq(p.state.total, 1L); eq(p.state.presentationPending, false); eq(p.presentations.size(), 1);
     // A partial arm failure preserves desired future state for an idempotent retry.
     p.failArm = true;
-    fails(() -> j.repairFutureOnly());
-    p.failArm = false; new Journal(p).repairFutureOnly();
+    fails(() -> j.repairFutureOnly(at("08:01")));
+    p.failArm = false; new Journal(p).repairFutureOnly(at("08:01"));
     eq(p.armed, at("09:00")); eq(p.state.total, 1L);
     fails(() -> Journal.reconcile(p.state, "old-lease", List.of(a), at("09:00")));
     // An arbitrarily long offline interval is skipped in one pass.
