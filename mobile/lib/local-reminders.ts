@@ -4,6 +4,8 @@ export type LocalReminderStatus = {
   status: 'cancelled' | 'stale_lease' | 'permission_blocked' | 'scheduled_os_limited' | 'inexact' | 'repair_required' | 'unsupported' | 'unsupported_timezone' | 'idle' | 'catchup_pending' | 'awaiting_plan' | 'clock_unverified';
   idleQuotaApplies?: boolean;
   clockUncertaintyMs?: number;
+  nextReminderAt?: string;
+  lastDeliveredAt?: string;
 };
 export type LocalReminderNative = {
   addListener(event: 'onLaunch', listener: () => void): { remove(): void };

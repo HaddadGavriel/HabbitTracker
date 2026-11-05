@@ -459,14 +459,22 @@ class AndroidAdapterTest {
   private fun alarmDelay() = requireNotNull(shadowOf(context.getSystemService(AlarmManager::class.java))
     .peekNextScheduledAlarm()).triggerAtTime - System.currentTimeMillis()
 
-  @Test fun productReconcileSkipsMissedTimesAndDoesNotReplayAfterRestart() {
+  @Test fun productReconcileRetainsRecentScheduledWorkWithoutIntroducingRetroactiveTimes() {
     val lease = Engine.acquire(context, owner)
     reconcile(lease, todayPlan(times = listOf("08:00", "09:00")))
-    reconcile(lease, todayPlan("08:05", listOf("08:00", "09:00")))
+    reconcile(lease, todayPlan("08:05", listOf("07:59", "08:00", "09:00")))
     repeat(3) { Engine.repair(context); assertEquals(lease, Engine.acquire(context, owner)) }
     assertEquals(0L, journal().getLong("total"))
-    assertEquals(0, journal().getJSONArray("backlog").length())
+    assertEquals(1, journal().getJSONArray("backlog").length())
     assertNull(notification())
+    assertTrue(kotlin.math.abs(alarmDelay()) < 1000)
+    Engine.repair(context, Engine.RepairReason.ALARM)
+    assertEquals(1L, journal().getLong("total"))
+    assertEquals(1, FailingNotifications.posts)
+    assertTrue(notification().extras.getString(Notification.EXTRA_TEXT)!!.contains("08:00"))
+    repeat(3) { reconcile(lease, todayPlan("08:05", listOf("07:59", "08:00", "09:00"))) }
+    assertEquals(1, FailingNotifications.posts)
+    assertNotNull(notification())
     assertTrue(kotlin.math.abs(alarmDelay() - 55 * 60 * 1000L) < 1000)
   }
 
@@ -493,7 +501,7 @@ class AndroidAdapterTest {
       assertEquals(1, shadowOf(context.getSystemService(AlarmManager::class.java)).scheduledAlarms.size)
     }
     Engine.repair(context, Engine.reasonForBroadcast("com.habbittracker.REMINDER"))
-    assertEquals(2L, journal().getLong("total")) // two habits at 08:00, no second batch for 09:00
+    assertEquals(2L, journal().getLong("total")) // 08:00 expired; two eligible habits at 09:00
     assertEquals(1, FailingNotifications.posts)
     assertTrue(notification().extras.getString(Notification.EXTRA_TEXT)!!.startsWith("2 habit"))
     repeat(3) { worker.doWork(); Engine.repair(context, Engine.RepairReason.ALARM) }
@@ -527,7 +535,7 @@ class AndroidAdapterTest {
     val lease = Engine.acquire(context, owner)
     reconcile(lease, todayPlan(times = listOf("08:00", "09:00")))
     advanceAnchor("2026-10-21T08:00:00Z")
-    FailingAtomicFile.writesBeforeFailure = 1
+    FailingAtomicFile.writesBeforeFailure = 2 // consumption + attempt commit, then post-result write fails
     assertEquals("repair_required", Engine.repair(context, Engine.RepairReason.ALARM)["status"])
     assertTrue(journal().getBoolean("presentationPending"))
     assertEquals(1, FailingNotifications.posts)
@@ -559,6 +567,195 @@ class AndroidAdapterTest {
     repeat(2) { Engine.repair(context, Engine.RepairReason.ALARM) }
     assertEquals(1L, journal().getLong("total"))
     assertEquals(1, FailingNotifications.posts)
+  }
+
+  @Test fun productUnchangedSyncKeepsVisibleReceiptAndReportsScheduleDiagnostics() {
+    val lease = Engine.acquire(context, owner)
+    reconcile(lease, todayPlan(times = listOf("08:00", "09:00")))
+    advanceAnchor("2026-10-21T08:00:00Z")
+    Engine.repair(context, Engine.RepairReason.ALARM)
+    val receipt = shadowOf(notification().contentIntent).savedIntent.action
+    val result = reconcile(lease, todayPlan("08:01", listOf("08:00", "09:00")))
+    assertNotNull(notification())
+    assertEquals(receipt, shadowOf(notification().contentIntent).savedIntent.action)
+    assertEquals(1, FailingNotifications.posts)
+    assertEquals(0L, journal().getLong("acknowledged"))
+    assertEquals("2026-10-21T09:00:00Z", result["nextReminderAt"])
+    assertTrue(result["lastDeliveredAt"].toString().startsWith("2026-10-21T08:00:"))
+  }
+
+  @Test fun productEachBatchShowsItsOwnScheduledTimeAndCount() {
+    val lease = Engine.acquire(context, owner)
+    reconcile(lease, todayPlan(times = listOf("08:00", "09:00")))
+    advanceAnchor("2026-10-21T08:00:00Z")
+    Engine.repair(context, Engine.RepairReason.ALARM)
+    assertTrue(notification().extras.getString(Notification.EXTRA_TEXT)!!.contains("2026-10-21 08:00 (UTC)"))
+    advanceAnchor("2026-10-21T09:00:00Z")
+    Engine.repair(context, Engine.RepairReason.ALARM)
+    val text = notification().extras.getString(Notification.EXTRA_TEXT)!!
+    assertTrue(text.startsWith("1 habit"))
+    assertTrue(text.contains("2026-10-21 09:00 (UTC)"))
+    assertFalse(text.contains("since your last"))
+    assertEquals(0, notification().flags and Notification.FLAG_ONLY_ALERT_ONCE)
+    assertEquals(2L, journal().getLong("total"))
+    assertEquals(1, shadowOf(context.getSystemService(NotificationManager::class.java)).size())
+  }
+
+  @Test fun productSuppressionKeepsOtherVisibleBatchMembersWithoutAlertingAgain() {
+    val lease = Engine.acquire(context, owner)
+    val value = todayPlan()
+    val rows = value.getJSONArray("effective")
+    rows.put(JSONObject(rows.getJSONObject(0).toString()).put("habit_id", "bbbbbbbb-2222-4222-8222-222222222222"))
+    reconcile(lease, value)
+    advanceAnchor("2026-10-21T08:00:00Z")
+    Engine.repair(context, Engine.RepairReason.ALARM)
+    assertTrue(notification().extras.getString(Notification.EXTRA_TEXT)!!.startsWith("2 habit"))
+    Engine.suppress(context, lease, owner, "2026-10-21")
+    assertNotNull(notification())
+    assertTrue(notification().extras.getString(Notification.EXTRA_TEXT)!!.startsWith("1 habit"))
+    assertTrue(notification().flags and Notification.FLAG_ONLY_ALERT_ONCE != 0)
+    assertEquals(2L, journal().getLong("total"))
+    Engine.suppress(context, lease, "bbbbbbbb-2222-4222-8222-222222222222", "2026-10-21")
+    assertNull(notification())
+  }
+
+  @Test fun productKnownNotifyFailureRetriesSameBatchAndKeepsFutureAlarmRecoverable() {
+    val lease = Engine.acquire(context, owner)
+    reconcile(lease, todayPlan(times = listOf("08:00", "09:00")))
+    advanceAnchor("2026-10-21T08:00:00Z")
+    FailingNotifications.fail = true
+    assertEquals("repair_required", Engine.repair(context, Engine.RepairReason.ALARM)["status"])
+    assertNull(notification())
+    assertEquals(1L, journal().getLong("total"))
+    assertTrue(journal().getBoolean("presentationPending"))
+    assertFalse(saved().has("attemptSequence"))
+    assertTrue(kotlin.math.abs(alarmDelay() - 60_000) < 1000)
+    FailingNotifications.fail = false
+    advanceAnchor("2026-10-21T08:01:00Z")
+    Engine.repair(context, Engine.RepairReason.ALARM)
+    repeat(3) { Engine.repair(context) }
+    assertEquals(1, FailingNotifications.posts)
+    assertEquals(1L, journal().getLong("total"))
+    assertFalse(journal().getBoolean("presentationPending"))
+    assertTrue(kotlin.math.abs(alarmDelay() - 59 * 60_000) < 1000)
+  }
+
+  @Test fun productExpiredRetryCannotBlockTheNextScheduledBatch() {
+    val lease = Engine.acquire(context, owner)
+    reconcile(lease, todayPlan(times = listOf("08:00", "09:00")))
+    advanceAnchor("2026-10-21T08:00:00Z")
+    FailingNotifications.fail = true
+    Engine.repair(context, Engine.RepairReason.ALARM)
+    FailingNotifications.fail = false
+    advanceAnchor("2026-10-21T09:01:00Z")
+    Engine.repair(context, Engine.RepairReason.ALARM)
+    assertEquals(1, FailingNotifications.posts)
+    assertTrue(notification().extras.getString(Notification.EXTRA_TEXT)!!.contains("09:00"))
+    assertEquals(2L, journal().getLong("total"))
+  }
+
+  @Test fun productNewDueBatchSupersedesRetryWithoutTwoImmediateAlerts() {
+    val lease = Engine.acquire(context, owner)
+    reconcile(lease, todayPlan(times = listOf("08:00", "08:30", "09:00")))
+    advanceAnchor("2026-10-21T08:00:00Z")
+    FailingNotifications.fail = true
+    Engine.repair(context, Engine.RepairReason.ALARM)
+    FailingNotifications.fail = false
+    advanceAnchor("2026-10-21T08:30:00Z")
+    Engine.repair(context, Engine.RepairReason.ALARM)
+    assertEquals(1, FailingNotifications.posts)
+    assertTrue(notification().extras.getString(Notification.EXTRA_TEXT)!!.contains("08:30"))
+    assertEquals(2L, journal().getLong("total"))
+    assertFalse(journal().getBoolean("presentationPending"))
+    assertTrue(kotlin.math.abs(alarmDelay() - 30 * 60_000) < 1000)
+  }
+
+  @Test fun productPermissionRevocationDropsPendingRetryBeforeRestoration() {
+    val lease = Engine.acquire(context, owner)
+    reconcile(lease, todayPlan(times = listOf("08:00", "09:00")))
+    advanceAnchor("2026-10-21T08:00:00Z")
+    FailingNotifications.fail = true
+    Engine.repair(context, Engine.RepairReason.ALARM)
+    shadowOf(context.getSystemService(NotificationManager::class.java)).setNotificationsEnabled(false)
+    Engine.repair(context)
+    FailingNotifications.fail = false
+    shadowOf(context.getSystemService(NotificationManager::class.java)).setNotificationsEnabled(true)
+    advanceAnchor("2026-10-21T08:02:00Z")
+    Engine.repair(context)
+    assertNull(notification())
+    assertFalse(journal().getBoolean("presentationPending"))
+    assertTrue(kotlin.math.abs(alarmDelay() - 58 * 60_000) < 1000)
+  }
+
+  @Test fun productExpiredEarlierBatchDoesNotHideALaterEligibleBatch() {
+    val lease = Engine.acquire(context, owner)
+    val value = todayPlan(times = listOf("08:15"))
+    val rows = value.getJSONArray("effective")
+    rows.getJSONObject(0).put("closes_at", "2026-10-21T08:30:00Z")
+    rows.put(JSONObject(rows.getJSONObject(0).toString())
+      .put("habit_id", "bbbbbbbb-2222-4222-8222-222222222222")
+      .put("closes_at", "2026-10-22T00:00:00Z").put("reminder_times", JSONArray(listOf("09:00"))))
+    reconcile(lease, value)
+    advanceAnchor("2026-10-21T09:05:00Z")
+    Engine.repair(context, Engine.RepairReason.ALARM)
+    assertEquals(1, FailingNotifications.posts)
+    assertTrue(notification().extras.getString(Notification.EXTRA_TEXT)!!.contains("09:00"))
+  }
+
+  @Test fun productRetryNeverPostsAfterTheOccurrenceDeadline() {
+    val lease = Engine.acquire(context, owner)
+    val value = todayPlan()
+    value.getJSONArray("effective").getJSONObject(0).put("closes_at", "2026-10-21T08:01:00Z")
+    reconcile(lease, value)
+    advanceAnchor("2026-10-21T08:00:00Z")
+    FailingNotifications.fail = true
+    Engine.repair(context, Engine.RepairReason.ALARM)
+    FailingNotifications.fail = false
+    advanceAnchor("2026-10-21T08:02:00Z")
+    Engine.repair(context, Engine.RepairReason.ALARM)
+    assertNull(notification())
+    assertFalse(journal().getBoolean("presentationPending"))
+    assertEquals(0, FailingNotifications.posts)
+  }
+
+  @Test fun productCompletionCancelsAnUnpresentedRetryAndDoesNotReviveIt() {
+    val lease = Engine.acquire(context, owner)
+    reconcile(lease, todayPlan(times = listOf("08:00", "09:00")))
+    advanceAnchor("2026-10-21T08:00:00Z")
+    FailingNotifications.fail = true
+    Engine.repair(context, Engine.RepairReason.ALARM)
+    Engine.suppress(context, lease, owner, "2026-10-21")
+    FailingNotifications.fail = false
+    Engine.repair(context, Engine.RepairReason.ALARM)
+    assertNull(notification())
+    assertFalse(journal().getBoolean("presentationPending"))
+    assertTrue(kotlin.math.abs(alarmDelay() - 24 * 60 * 60_000L) < 1000)
+  }
+
+  @Test fun productRefreshAfterGraceExpiresSkipsOldBatchWithoutCatchingUp() {
+    val lease = Engine.acquire(context, owner)
+    reconcile(lease, todayPlan(times = listOf("08:00", "10:00")))
+    reconcile(lease, todayPlan("09:01", listOf("08:00", "10:00")))
+    Engine.repair(context, Engine.RepairReason.ALARM)
+    assertNull(notification())
+    assertEquals(0L, journal().getLong("total"))
+    assertTrue(kotlin.math.abs(alarmDelay() - 59 * 60_000) < 1000)
+  }
+
+  @Test fun productLegacyJournalUpgradeDoesNotRepostAnUnknownSummary() {
+    val lease = Engine.acquire(context, owner)
+    reconcile(lease, todayPlan(times = listOf("08:00", "09:00")))
+    advanceAnchor("2026-10-21T08:00:00Z")
+    Engine.repair(context, Engine.RepairReason.ALARM)
+    val old = saved()
+    old.getJSONObject("journal").put("version", 2).remove("delivery")
+    context.noBackupFilesDir.resolve("local-reminders-v1.json").writeText(old.toString())
+    reconcile(lease, todayPlan("08:01", listOf("08:00", "09:00")))
+    assertNull(notification())
+    assertEquals(3, journal().getInt("version"))
+    advanceAnchor("2026-10-21T09:00:00Z")
+    Engine.repair(context, Engine.RepairReason.ALARM)
+    assertTrue(notification().extras.getString(Notification.EXTRA_TEXT)!!.startsWith("1 habit"))
   }
 
   @Test fun productCompletionAndExcuseSuppressionKeepFutureDatesAndUndoUsesOnlyFutureTimes() {
@@ -604,7 +801,7 @@ class AndroidAdapterTest {
     val lease = Engine.acquire(context, owner)
     reconcile(lease, todayPlan(times = listOf("08:00", "09:00")))
     advanceAnchor("2026-10-21T09:05:00Z")
-    FailingAtomicFile.writesBeforeFailure = 1 // counted consumption commits; post acknowledgement fails
+    FailingAtomicFile.writesBeforeFailure = 2 // consumption + attempt commit; post-result write fails
     assertEquals("repair_required", Engine.repair(context, Engine.RepairReason.ALARM)["status"])
     assertNotNull(notification())
     assertEquals(1L, journal().getLong("total"))

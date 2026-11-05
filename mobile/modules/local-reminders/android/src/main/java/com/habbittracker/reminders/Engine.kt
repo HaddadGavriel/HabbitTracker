@@ -152,7 +152,7 @@ internal object Engine {
       val total = s.optLong("unreadCount", 0)
       return Journal.State(s.getString("lease"), rules(s), cursor, emptyList(), total, 0, total > 0)
     }
-    require(j.getInt("version") == 2)
+    require(j.getInt("version") in 2..3)
     val backlog = j.getJSONArray("backlog")
     val windows = (0 until backlog.length()).map { i ->
       val w = backlog.getJSONObject(i); val saved = w.getJSONArray("rules")
@@ -165,15 +165,27 @@ internal object Engine {
       }
       Journal.Window(restored, Instant.parse(w.getString("cursor")), Instant.parse(w.getString("until")))
     }
+    val delivered = j.optJSONArray("delivery") ?: JSONArray()
+    val delivery = (0 until delivered.length()).map { i ->
+      val r = delivered.getJSONObject(i)
+      val rule = Planner.Rule(s.getString("owner"), r.getString("habit"), r.getString("zone"),
+        r.getString("date"), r.getString("date"),
+        if (r.isNull("closes")) null else r.getString("closes"), emptySet(), r.getString("time"))
+      Planner.Event(rule, rule.onlyDate, Planner.resolve(rule.onlyDate, rule.time, rule.zone))
+    }
+    // A process died after crossing the OS presentation boundary. Its result is
+    // ambiguous; do not alert again. A caught notify failure clears this marker
+    // and leaves a known retryable outbox instead.
+    val pending = j.getBoolean("presentationPending") && s.optLong("attemptSequence", -1) != j.getLong("total")
     return Journal.State(s.getString("lease"), rules(s), Instant.parse(j.getString("cursor")), windows,
-      j.getLong("total"), j.getLong("acknowledged"), j.getBoolean("presentationPending"))
+      j.getLong("total"), j.getLong("acknowledged"), pending, delivery)
   }
   /** A fresh supported plan can recover a quarantined journal without parsing
    * its unsupported rules. Keep receipt counters; never replay paused work. */
   private fun timezoneRecoveryState(s: JSONObject): Journal.State {
     val j = s.optJSONObject("journal")
     if (j != null) {
-      require(j.getInt("version") == 2)
+      require(j.getInt("version") in 2..3)
       return Journal.State(s.getString("lease"), emptyList(), Instant.parse(j.getString("cursor")),
         emptyList(), j.getLong("total"), j.getLong("acknowledged"), false)
     }
@@ -201,9 +213,14 @@ internal object Engine {
       backlog.put(JSONObject().put("rules", saved).put("cursor", w.cursor.toString()).put("until", w.until.toString()))
     }
     s.remove("cursor"); s.remove("unreadCount"); s.remove("countedBatch")
-    return s.put("journal", JSONObject().put("version", 2).put("cursor", state.cursor.toString())
+    val delivery = JSONArray()
+    for (e in state.delivery) delivery.put(JSONObject().put("habit", e.rule.habit).put("zone", e.rule.zone.id)
+      .put("date", e.date.toString()).put("closes", Journal.deadline(e).toString())
+      .put("time", e.rule.time.toString()))
+    s.remove("attemptSequence")
+    return s.put("journal", JSONObject().put("version", 3).put("cursor", state.cursor.toString())
       .put("backlog", backlog).put("total", state.total).put("acknowledged", state.acknowledged)
-      .put("presentationPending", state.presentationPending))
+      .put("presentationPending", state.presentationPending).put("delivery", delivery))
   }
   private fun port(c: Context, onInexact: () -> Unit = {}) = object : Journal.Port {
     override fun load(): Journal.State? = read(c)?.let { readJournal(it) }
@@ -225,7 +242,9 @@ internal object Engine {
     override fun present(state: Journal.State) {
       check(allowed(c)) { "notifications blocked" }
       // Consumption and the aggregate count were committed together before this OS boundary.
-      val owner = requireNotNull(read(c)).getString("owner")
+      val saved = requireNotNull(read(c))
+      val owner = saved.getString("owner")
+      val product = saved.optBoolean("futureOnly") && state.delivery.isNotEmpty()
       val count = state.total - state.acknowledged
       val launch = requireNotNull(c.packageManager.getLaunchIntentForPackage(c.packageName))
       launch.putExtra("local_reminder_type", "local_habit_reminder")
@@ -236,12 +255,47 @@ internal object Engine {
       // token would rewrite an OLD notification's receipt before a failed notify().
       launch.action = "com.habbittracker.LOCAL_REMINDER_TAP.${state.lease}.${state.total}"
       val tap = PendingIntent.getActivity(c, 231, launch, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+      val manager = c.getSystemService(NotificationManager::class.java)
+      val sameReceipt = manager.activeNotifications.any {
+        it.tag == "local-reminders" && it.id == 1 &&
+          it.notification.extras.getLong("local_reminder_sequence", -1) == state.total
+      }
+      val event = state.delivery.firstOrNull()
+      val body = if (product) "${state.delivery.size} habit ${if (state.delivery.size == 1) "reminder" else "reminders"} scheduled for ${event!!.date} ${event.rule.time} (${event.rule.zone.id}). Open Today."
+        else "${count} habit reminder(s) since your last notification tap. Open Today."
       val notification = NotificationCompat.Builder(c, CHANNEL)
         .setSmallIcon(c.applicationInfo.icon).setContentTitle("Habit Tracker")
-        .setContentText("${count} habit reminder(s) since your last notification tap. Open Today.")
+        .setContentText(body).setStyle(NotificationCompat.BigTextStyle().bigText(body))
+        .setOnlyAlertOnce(sameReceipt)
+        .setWhen(event?.instant?.toEpochMilli() ?: System.currentTimeMillis()).setShowWhen(true)
+        .addExtras(android.os.Bundle().apply { putLong("local_reminder_sequence", state.total) })
         .setContentIntent(tap).setAutoCancel(true).setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build()
-      c.getSystemService(NotificationManager::class.java).notify("local-reminders", 1, notification)
+      if (product) write(c, saved.put("attemptSequence", state.total))
+      try { manager.notify("local-reminders", 1, notification) }
+      catch (error: Exception) {
+        if (product) {
+          // Known failure: leave this counted batch retryable. If this write
+          // itself fails, the durable ambiguous-attempt marker stays in force.
+          saved.remove("attemptSequence")
+          write(c, saved)
+        }
+        throw error
+      }
+      if (product) write(c, saved.put("lastDeliveredAt", now(c).toString()))
     }
+  }
+  private fun commitReconciliation(c: Context, candidate: JSONObject, previous: Journal.State, replacement: Journal.State) {
+    val changed = previous.delivery.map { it.id } != replacement.delivery.map { it.id }
+    val visible = c.getSystemService(NotificationManager::class.java).activeNotifications.any { it.tag == "local-reminders" && it.id == 1 }
+    val next = if (changed && visible && replacement.delivery.isNotEmpty())
+      Journal.State(replacement.lease, replacement.rules, replacement.cursor, replacement.backlog,
+        replacement.total, replacement.acknowledged, true, replacement.delivery) else replacement
+    write(c, storeJournal(candidate, next))
+    // An unchanged sync must not dismiss an unread reminder. A removed batch or
+    // a legacy summary without membership is cleared; remaining members update
+    // the same receipt silently through the durable presentation path.
+    if (next.delivery.isEmpty() && (previous.delivery.isNotEmpty() || previous.total > previous.acknowledged))
+      c.getSystemService(NotificationManager::class.java).cancel("local-reminders", 1)
   }
   @Synchronized fun replace(c: Context, lease: String, plan: String, started: Long): Map<String, Any> =
     replacePlan(c, lease, plan, started, false)
@@ -283,8 +337,8 @@ internal object Engine {
     val replacement = if (futureOnly || timezoneRecovery) Journal.reconcile(previous, lease, replacementRules, serverNow)
       else Journal.replacement(previous, lease, replacementRules, serverNow,
         LocalDate.parse(p.getString("local_date")))
-    write(c, storeJournal(candidate, replacement)) // Plan, clock, backlog and outbox commit together.
-    if (futureOnly || timezoneRecovery) c.getSystemService(NotificationManager::class.java).cancel("local-reminders", 1)
+    if (futureOnly || timezoneRecovery) commitReconciliation(c, candidate, previous, replacement)
+    else write(c, storeJournal(candidate, replacement))
     return repair(c)
   }
   /** A server-confirmed mutation is applied before the next network refresh. */
@@ -297,11 +351,11 @@ internal object Engine {
     suppressed.put(JSONObject().put("habit", id).put("date", localDate ?: JSONObject.NULL))
     val candidate = JSONObject(s.toString()).put("suppressed", suppressed).put("futureOnly", true)
     if (s.optBoolean("timezoneBlocked")) return pauseForTimezone(c, s)
-    val reconciled = try { Journal.reconcile(readJournal(s), lease, rules(candidate), now(c)) }
+    val previous = try { readJournal(s) }
       catch (_: TimezonePolicy.UnsupportedTimezone) { return pauseForTimezone(c, s) }
-    write(c, storeJournal(candidate, reconciled))
-    // One generic shared summary cannot selectively represent its former members.
-    c.getSystemService(NotificationManager::class.java).cancel("local-reminders", 1)
+    val reconciled = try { Journal.reconcile(previous, lease, rules(candidate), now(c)) }
+      catch (_: TimezonePolicy.UnsupportedTimezone) { return pauseForTimezone(c, s) }
+    commitReconciliation(c, candidate, previous, reconciled)
     return repair(c)
   }
   @Synchronized fun acknowledge(c: Context, owner: String, lease: String?, sequence: Long): Boolean {
@@ -340,7 +394,10 @@ internal object Engine {
       val saved = read(c)
       if (saved == null) { alarm(c).cancel(intent(c)); return mapOf("status" to "cancelled") }
       if (saved.optBoolean("timezoneBlocked")) return pauseForTimezone(c, saved)
-      try { readJournal(saved) }
+      try {
+        val restored = readJournal(saved)
+        if (saved.has("attemptSequence")) write(c, storeJournal(saved, restored))
+      }
       catch (_: TimezonePolicy.UnsupportedTimezone) { return pauseForTimezone(c, saved) }
       val futureOnly = saved.optBoolean("futureOnly", false)
       worker(c)
@@ -349,7 +406,10 @@ internal object Engine {
         c.getSystemService(NotificationManager::class.java).cancel("local-reminders", 1)
         // Permission restoration is recovery, even if the next entry is a status
         // check or a stale alarm callback in a new process.
-        if (futureOnly && !saved.optBoolean("recoverMissed", false)) write(c, saved.put("recoverMissed", true))
+        if (futureOnly && !saved.optBoolean("recoverMissed", false)) {
+          val blocked = readJournal(saved)
+          write(c, storeJournal(saved.put("recoverMissed", true), blocked.acknowledge(blocked.total)))
+        }
         return mapOf("status" to "permission_blocked")
       }
       var usedInexact = false
@@ -358,16 +418,20 @@ internal object Engine {
         when {
           reason == RepairReason.RECOVERY || saved.optBoolean("recoverMissed", false) -> coordinator.recoverFutureOnly(now(c))
           reason == RepairReason.ALARM -> coordinator.deliverFutureOnly(now(c))
-          else -> coordinator.repairFutureOnly()
+          else -> coordinator.repairFutureOnly(now(c))
         }
         true
       } else coordinator.tick(now(c))
       val state = requireNotNull(read(c))
       if (!caughtUp) return mapOf("status" to "catchup_pending")
       if (state.isNull("plan")) return mapOf("status" to "awaiting_plan")
-      if (port(c).load()?.pending?.isEmpty() != false) return mapOf("status" to "idle")
+      val journal = port(c).load()
+      val details = mutableMapOf<String, Any>()
+      journal?.pending?.firstOrNull()?.let { details["nextReminderAt"] = it.instant.toString() }
+      if (state.has("lastDeliveredAt")) details["lastDeliveredAt"] = state.getString("lastDeliveredAt")
+      if (journal?.pending?.isEmpty() != false) return details + mapOf("status" to "idle")
       if (state.getInt("boot") != boot(c)) return mapOf("status" to "clock_unverified", "idleQuotaApplies" to true)
-      mapOf("status" to if (!usedInexact && exact(c)) "scheduled_os_limited" else "inexact", "idleQuotaApplies" to true,
+      details + mapOf("status" to if (!usedInexact && exact(c)) "scheduled_os_limited" else "inexact", "idleQuotaApplies" to true,
         "clockUncertaintyMs" to state.getLong("clockUncertaintyMs"))
     } catch (_: Exception) { mapOf("status" to "repair_required") }
   }

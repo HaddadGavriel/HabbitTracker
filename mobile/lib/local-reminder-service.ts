@@ -7,6 +7,7 @@ export type LocalReminderState = {
   status: 'off' | 'checking' | 'scheduled' | 'denied' | 'error' | 'unsupported';
   enabled: boolean; busy: boolean; permission: 'unknown' | 'granted' | 'denied';
   message: string; lastSuccess: string | null; nativeStatus: LocalReminderStatus['status'] | null;
+  nextReminderAt?: string | null; lastDeliveredAt?: string | null;
 };
 export type LocalReminderDependencies = {
   native: LocalReminderNative | null;
@@ -14,8 +15,13 @@ export type LocalReminderDependencies = {
   permission(request: boolean): Promise<boolean>;
   loadEnabled(): Promise<string | null>;
   saveEnabled(owner: string | null): Promise<void>;
+  /** Override only for deterministic timeout tests. */
+  timeoutMs?: number;
 };
 export type ReminderSuppression = { habitId: string; localDate?: string };
+class ReminderTimeout extends Error {
+  constructor(readonly phase: string) { super(`Reminder operation timed out: ${phase}`); }
+}
 
 /** Native writes have one queue. Network reads have one coalescing pump, outside
  * that queue so logout never waits for an old account's HTTP response. Every
@@ -45,7 +51,20 @@ export class LocalReminderService {
     this.state = { ...this.state, ...change }; this.listeners.forEach(listener => listener());
   }
   private exclusive<T>(operation: () => Promise<T>): Promise<T> {
-    const next = this.queue.then(operation); this.queue = next.catch(() => {}); return next;
+    const next = this.queue.then(operation);
+    // Keep the actual write on the queue after a UI timeout. A Promise timeout
+    // does not cancel an Android/storage operation; allowing another owner to
+    // overtake it could resurrect an old account's schedule or preference.
+    this.queue = next.catch(() => {});
+    return this.waitFor(next, 'reading or updating reminders on this device');
+  }
+  private async waitFor<T>(operation: Promise<T>, phase: string, milliseconds = 15_000): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([operation, new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new ReminderTimeout(phase)), this.deps.timeoutMs ?? milliseconds);
+      })]);
+    } finally { clearTimeout(timer); }
   }
   private async init() {
     if (!this.loaded) {
@@ -53,9 +72,16 @@ export class LocalReminderService {
       catch (error) { await this.cancel(); throw error; }
     }
   }
-  private failed() {
+  private failed(error?: unknown) {
+    if (error instanceof ReminderTimeout) {
+      // Fence continuations of a timed-out queued operation. Read-only bridge
+      // calls can be retried immediately; writes remain serialized until settled.
+      this.epoch++; this.revision++; this.pending = false;
+    }
     this.publish({ status: 'error', busy: false,
-      message: 'Reminder scheduling or cleanup could not be confirmed. Your saved habits are unchanged. Retry / resync reminders; check system notification settings if this continues.' });
+      message: error instanceof ReminderTimeout
+        ? `Reminders timed out while ${error.phase}. Retry / resync reminders. If this repeats, close and reopen the app while connected. Your saved habits are unchanged.`
+        : 'Reminder scheduling or cleanup could not be confirmed. Your saved habits are unchanged. Retry / resync reminders; check system notification settings if this continues.' });
   }
   private async cancel() {
     this.lease = null;
@@ -87,7 +113,7 @@ export class LocalReminderService {
           }
           if (epoch === this.epoch) this.publish({ enabled: this.enabledOwner === owner });
         });
-      } catch { if (epoch === this.epoch) this.failed(); }
+      } catch (error) { if (epoch === this.epoch) this.failed(error); }
       return;
     }
     const session = state.status === 'ready' ? state.session : null;
@@ -99,6 +125,7 @@ export class LocalReminderService {
     this.session = session;
     const epoch = ++this.epoch; this.revision++;
     this.publish({ busy: false, ...(!session ? { enabled: false } : {}),
+      ...(old?.user.id !== session?.user.id ? { nextReminderAt: null, lastDeliveredAt: null } : {}),
       lastSuccess: old?.user.id === session?.user.id ? this.state.lastSuccess : null });
     try {
       await this.exclusive(async () => {
@@ -128,7 +155,7 @@ export class LocalReminderService {
           status: 'off', message: session ? 'Enable habit reminders on this device.' : 'Sign in to enable habit reminders.' });
       });
       if (epoch === this.epoch && session) await this.refresh();
-    } catch { if (epoch === this.epoch) this.failed(); }
+    } catch (error) { if (epoch === this.epoch) this.failed(error); }
   };
   enable = async (): Promise<void> => {
     const session = this.session;
@@ -144,11 +171,11 @@ export class LocalReminderService {
       });
       if (epoch !== this.epoch) return;
       if (!this.deps.native) { await this.refresh(); return; }
-      const allowed = await this.deps.permission(true);
+      const allowed = await this.waitFor(this.deps.permission(true), 'requesting notification permission', 120_000);
       if (epoch !== this.epoch) return;
       if (!allowed) { await this.blocked(epoch); return; }
       await this.refresh();
-    } catch { if (epoch === this.epoch) this.failed(); }
+    } catch (error) { if (epoch === this.epoch) this.failed(error); }
   };
   disable = async (current = () => true): Promise<void> => {
     if (!current()) return;
@@ -162,8 +189,8 @@ export class LocalReminderService {
         this.enabledOwner = null; this.loaded = true;
         try { await this.cancel(); } finally { await this.deps.saveEnabled(null); }
       });
-      if (epoch === this.epoch) this.publish({ status: 'off', busy: false, nativeStatus: 'cancelled', message: 'Habit reminders are off on this device.' });
-    } catch { if (epoch === this.epoch) this.failed(); }
+      if (epoch === this.epoch) this.publish({ status: 'off', busy: false, nativeStatus: 'cancelled', nextReminderAt: null, lastDeliveredAt: null, message: 'Habit reminders are off on this device.' });
+    } catch (error) { if (epoch === this.epoch) this.failed(error); }
   };
   /** Call and confirm cleanup before a future account-deletion flow removes auth. */
   beforeAccountDeletion = async (current = () => true): Promise<void> => {
@@ -174,6 +201,7 @@ export class LocalReminderService {
   private async blocked(epoch: number) {
     await this.exclusive(async () => { if (epoch === this.epoch) await this.cancel(); });
     if (epoch === this.epoch) this.publish({ status: 'denied', busy: false, permission: 'denied', nativeStatus: 'permission_blocked',
+      nextReminderAt: null,
       message: 'Habit reminders are blocked. Allow notifications and the Habit reminders channel in system settings, then retry / resync. Habit tracking still works.' });
   }
   changed = async (session: Session, suppression?: ReminderSuppression): Promise<void> => {
@@ -190,13 +218,15 @@ export class LocalReminderService {
         if (result.status === 'repair_required' || result.status === 'stale_lease') throw new Error('Suppression not confirmed');
       });
       if (current()) await this.refresh();
-    } catch { if (current()) this.failed(); }
+    } catch (error) { if (current()) this.failed(error); }
   };
   refresh = (): Promise<void> => {
     // Foreground/connectivity events may arrive before Auth/profile hydration.
     // Only a definitive signed-out state authorizes startup cleanup.
     if (this.authPending) return Promise.resolve();
-    this.pending = true; this.revision++;
+    // A routine poll requests another read without invalidating the useful one
+    // already in flight. Account transitions and confirmed mutations fence it.
+    this.pending = true;
     if (!this.work) {
       this.work = this.drain().finally(() => { this.work = null; });
     }
@@ -213,13 +243,14 @@ export class LocalReminderService {
         if (!session || this.enabledOwner !== session.user.id) {
           // Retry also repairs an earlier failed disable or signed-out cleanup.
           await this.exclusive(async () => { if (current()) await this.cancel(); });
-          if (current()) this.publish({ status: 'off', enabled: false, busy: false, message: 'Habit reminders are off on this device.' });
+          if (current()) this.publish({ status: 'off', enabled: false, busy: false, nextReminderAt: null,
+            lastDeliveredAt: null, message: 'Habit reminders are off on this device.' });
           continue;
         }
         const native = this.deps.native;
         if (!native) { this.publish({ status: 'unsupported', busy: false, message: 'Local habit reminders require an Android development or release build. Habit tracking still works.' }); continue; }
         this.publish({ status: 'checking', busy: true, enabled: true, message: 'Refreshing habit reminders…' });
-        const allowed = await this.deps.permission(false);
+        const allowed = await this.waitFor(this.deps.permission(false), 'checking notification permission');
         if (!current()) continue;
         if (!allowed) { await this.blocked(epoch); continue; }
         this.publish({ permission: 'granted' });
@@ -228,8 +259,8 @@ export class LocalReminderService {
           this.lease ??= await native.acquire(session.user.id); return this.lease;
         });
         if (!current() || !lease) continue;
-        const started = await native.clock();
-        const plan = await this.deps.readPlan(session);
+        const started = await this.waitFor(native.clock(), 'checking the Android clock');
+        const plan = await this.waitFor(this.deps.readPlan(session), 'loading the reminder schedule', 35_000);
         if (!current()) continue;
         if (plan.owner_id !== session.user.id) throw new Error('Reminder plan account mismatch');
         await this.exclusive(async () => {
@@ -237,8 +268,9 @@ export class LocalReminderService {
           const result = await native.reconcile(lease, JSON.stringify(plan), started);
           if (!current()) return;
           if (result.status === 'permission_blocked') { await this.cancel(); this.publish({ status: 'denied', permission: 'denied', busy: false,
-            nativeStatus: result.status, message: 'Habit reminders are blocked. Open system notification settings, allow the Habit reminders channel, then retry / resync.' }); return; }
-          this.publish({ nativeStatus: result.status });
+            nativeStatus: result.status, nextReminderAt: null, message: 'Habit reminders are blocked. Open system notification settings, allow the Habit reminders channel, then retry / resync.' }); return; }
+          this.publish({ nativeStatus: result.status, nextReminderAt: result.nextReminderAt ?? null,
+            lastDeliveredAt: result.lastDeliveredAt ?? null });
           if (result.status === 'unsupported_timezone') {
             this.publish({ status: 'error', busy: false, lastSuccess: null,
               message: 'Habit reminders are paused because this device cannot use a profile or saved occurrence timezone. In Settings, choose a supported IANA timezone such as Asia/Jerusalem or UTC, then retry / resync. Existing occurrence dates and deadlines stay unchanged; reminders remain paused while an unsupported occurrence is still eligible. Updating Android may also restore timezone support.' });
@@ -250,7 +282,7 @@ export class LocalReminderService {
               : result.status === 'inexact' ? 'Reminders scheduled with inexact alarms. Android may delay them. Allow Alarms & reminders in system settings for more precise timing.'
               : 'Reminders scheduled on this device. Android battery and idle restrictions can delay delivery.' });
         });
-      } catch { if (current()) this.failed(); }
+      } catch (error) { if (current()) this.failed(error); }
     }
   }
 }

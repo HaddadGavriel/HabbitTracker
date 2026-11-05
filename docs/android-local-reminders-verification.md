@@ -56,7 +56,7 @@ switching clears the pause together with the previous owner's schedule.
 | Reboot | Configure a future time, run `adb reboot`, unlock the device after boot, and wait without opening the app. | Boot restoration should re-arm persisted future work when Android permits. Record `clock_unverified` until a fresh authenticated plan; elapsed times are skipped, not replayed in a burst. No delivery is promised while powered off or before unlock. |
 | Force-stop | Separately run `adb shell am force-stop com.haddadgavriel.habittracker`, or Settings → Apps → Habit Tracker → Force stop. | Android stops alarms/work/receivers for the stopped package. No background delivery or reboot recovery is promised until the user explicitly launches the app. Relaunch, refresh and verify only future times resume. |
 | Doze/battery limits | Test a locked, idle device; record battery optimization and OEM restrictions. Optionally use Android's documented test-device idle commands. | Exact-alarm access does not remove allow-while-idle quotas; inexact work can be delayed further. A delayed scheduled batch may appear once. Recovery must not emit a burst for all missed times. Restore any test-only settings. |
-| Routine repair before a delayed alarm | In the isolated native test harness, advance the clock past two configured times, run status and periodic repair before the alarm callback, then deliver duplicate callbacks. | Repairs retain the overdue batch and one alarm without posting. The callback posts only the first due batch once, skips the other elapsed times, and arms the next future time. |
+| Routine repair before a delayed alarm | In the isolated native test harness, advance the clock past two configured times, run status and periodic repair before the alarm callback, then deliver duplicate callbacks. | Repairs retain the overdue batch and one alarm without posting. The callback posts only the first still-open batch within the one-hour grace period once, skips the other elapsed times, and arms the next future time. |
 | Explicit missed-backlog recovery | In the isolated native test harness, advance far beyond the stored cursor, then invoke boot/package-replacement recovery. | Recovery skips missed times without posting or draining a large backlog. Routine repair after recovery still preserves the next alarm if its callback is delayed. |
 | App upgrade | Install a compatible newer build without clearing data, then relaunch/refresh. | Existing journal and preference recover, no already consumed reminder replays, current account owns the schedule. |
 
@@ -128,8 +128,15 @@ disabled. Always record the status **after** returning and refreshing.
   the habit again. Settings must retain actionable failure/retry state, and repair
   must preserve account isolation and consumed-time deduplication.
 
-The engine uses one generic local summary slot. Suppressing a date/habit clears
-that shared presented summary conservatively; it does not promise selective
-removal of an individual habit's line. Screenshots, logs and alarm listings support
+The engine uses one local summary slot for the latest batch and persists its
+membership. Unchanged refresh must leave it visible. Suppressing a member updates
+the count silently; removing the last member clears the notification. The next
+batch shows its own scheduled time and count. Screenshots, logs and alarm listings support
 manual observations but do not prove that a human saw a notification. Automated
 store/native tests do not establish physical-device delivery or OEM behavior.
+
+For the reminder repair release, also run the shorter
+[installed-phone regression checklist](local-reminders-phone-test.md). Include
+an unchanged resync immediately after delivery, an offline restart/reconnect,
+and the timeout UI. Native fault injection covers a stalled bridge and rejected
+notification; turning Wi-Fi off alone does not simulate those native failures.

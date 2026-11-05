@@ -109,7 +109,7 @@ test('Settings local controls expose permission, failure, last sync and actionab
   })[name]);
   const tree = controls.LocalReminderControls(), content = text(tree);
   assert.match(content, /Notification permission: Blocked/); assert.match(content, /Scheduling needs repair/);
-  assert.match(content, /Last successful schedule sync: 2026-10-21T12:00:00Z/);
+  assert.ok(content.includes(`Last successful schedule sync: ${new Date(state.lastSuccess).toLocaleString()}`));
   assert.match(content, /Another device.*offline notifications/); assert.match(content, /permission denial does not block habit tracking/);
   const buttons = new Map(nodes(tree).filter(node => node.type === 'Button').map(node => [node.props.title, node.props]));
   assert.equal(buttons.get('Enable habit reminders').disabled, true);
@@ -146,6 +146,79 @@ function coordinator(options = {}) {
   const state = (status, s = current) => ({ status, session: s, profile: status === 'ready' ? fullProfile(s.user.id) : null, error: null });
   return { service, native, nativeState, saved, calls, current, state };
 }
+
+test('a stalled clock times out, enables retry, and its late result cannot install a plan', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const x = coordinator(), stalled = deferred();
+  await x.service.setSession(x.state('ready'));
+  const previous = x.service.snapshot().lastSuccess;
+  x.native.clock = () => stalled.promise;
+  const refresh = x.service.refresh(); await flush();
+  assert.equal(x.service.snapshot().busy, true);
+  t.mock.timers.tick(15_001); await refresh;
+  assert.equal(x.service.snapshot().busy, false);
+  assert.equal(x.service.snapshot().status, 'error');
+  assert.match(x.service.snapshot().message, /timed out.*Android clock/);
+  assert.equal(x.service.snapshot().lastSuccess, previous);
+  x.native.clock = async () => 2;
+  await x.service.refresh();
+  const installed = x.calls.filter(call => call[0] === 'reconcile').length;
+  stalled.resolve(1); await flush();
+  assert.equal(x.calls.filter(call => call[0] === 'reconcile').length, installed);
+  assert.equal(x.service.snapshot().status, 'scheduled');
+});
+
+test('permission and plan waits have deadlines and preserve a previously installed schedule', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const [boundary, milliseconds, phase] of [['permission', 15_001, /permission/], ['readPlan', 35_001, /schedule/]]) {
+    const x = coordinator(), stalled = deferred();
+    await x.service.setSession(x.state('ready'));
+    const original = x.service.deps[boundary];
+    x.service.deps[boundary] = () => stalled.promise;
+    const refresh = x.service.refresh(); await flush();
+    t.mock.timers.tick(milliseconds); await refresh;
+    assert.equal(x.service.snapshot().status, 'error');
+    assert.equal(x.service.snapshot().busy, false);
+    assert.match(x.service.snapshot().message, phase);
+    assert.equal(x.nativeState.cancelled, false);
+    x.service.deps[boundary] = original;
+    await x.service.refresh();
+    assert.equal(x.service.snapshot().status, 'scheduled');
+  }
+});
+
+test('a timed-out native write stays serialized and cannot publish success for a replacement account', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const x = coordinator(), stalled = deferred();
+  await x.service.setSession(x.state('ready'));
+  x.native.reconcile = () => stalled.promise;
+  const refresh = x.service.refresh(); await flush();
+  t.mock.timers.tick(15_001); await refresh;
+  assert.equal(x.service.snapshot().status, 'error');
+  const cancellations = x.calls.filter(call => call[0] === 'cancel').length;
+  const switched = x.service.setSession(x.state('ready', session(bob))); await flush();
+  assert.equal(x.calls.filter(call => call[0] === 'cancel').length, cancellations);
+  stalled.resolve({ status: 'scheduled_os_limited' }); await switched;
+  assert.equal(x.service.snapshot().enabled, false);
+  assert.equal(x.service.snapshot().lastSuccess, null);
+  assert.ok(x.calls.filter(call => call[0] === 'cancel').length > cancellations);
+  assert.equal(x.saved.owner, null);
+});
+
+test('repeated polls do not invalidate a useful in-flight plan', async () => {
+  const x = coordinator(), pending = deferred();
+  await x.service.setSession(x.state('ready'));
+  const original = x.service.deps.readPlan;
+  let reads = 0;
+  x.service.deps.readPlan = s => ++reads === 1 ? pending.promise : original(s);
+  const initialInstalls = x.calls.filter(call => call[0] === 'reconcile').length;
+  const refresh = x.service.refresh(); await flush();
+  for (let i = 0; i < 20; i++) x.service.refresh();
+  pending.resolve(await original(x.current)); await refresh;
+  assert.equal(reads, 2);
+  assert.equal(x.calls.filter(call => call[0] === 'reconcile').length, initialInstalls + 2);
+  assert.equal(x.service.snapshot().busy, false);
+});
 
 test('unsupported timezone pauses reminders visibly without losing opt-in and recovers after correction', async () => {
   const x = coordinator();
