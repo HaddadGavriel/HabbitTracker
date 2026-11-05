@@ -5,13 +5,14 @@ import type { SessionStore } from './session-store';
 import { reconcileReminders, type ReminderMutations } from './reminder-mutations';
 
 type CompletionState = { pending: boolean; error: string | null; refreshRequired: boolean };
-type Operation = CompletionState & { context: number; clearErrorOnRefresh?: boolean };
+type Operation = CompletionState & { context: symbol; clearErrorOnRefresh?: boolean };
 type Change = { kind: 'completion'; value: boolean } | { kind: 'progress'; value: number };
 type ExcuseAPI = {
   readExcuse(session: Session, id: string): Promise<ExcuseResult>;
   submitExcuse(session: Session, id: string, explanation: string): Promise<ExcuseResult>;
 };
 type ExcuseLock = { pending: boolean; needsRead: boolean; exists: boolean };
+type WriteGuards = { operations: Map<string, Operation>; locks: Map<string, ExcuseLock>; activeStores: Set<TodayStore> };
 type OwnerExcuse = { draft: string; open: boolean; details: boolean; result: ExcuseResult | null; error: string | null; message: string | null };
 const emptyExcuse = (): OwnerExcuse => ({ draft: '', open: false, details: false, result: null, error: null, message: null });
 type TodayState = {
@@ -58,19 +59,20 @@ function atLeastAsRecent(timestamp: string, previous: string): boolean {
 /** Screen-scoped server snapshots. The server owns states and all write eligibility. */
 export class TodayStore {
   // Keep only write guards across screen remounts; never retain explanations or credentials.
-  private static excuseGuards = new WeakMap<object, { locks: Map<string, ExcuseLock>; activeStores: Set<TodayStore> }>();
-  private excuseGroup: { locks: Map<string, ExcuseLock>; activeStores: Set<TodayStore> };
+  private static writeGuards = new WeakMap<object, WriteGuards>();
+  private guardGroup: WriteGuards;
   private excuseLocks: Map<string, ExcuseLock>;
   private state = emptyState();
   private listeners = new Set<() => void>();
   private session: Session | null = null;
-  private context = 0;
+  // Contexts must also differ across store instances sharing the write guards.
+  private context = Symbol();
   private readRevision = 0;
   private active = false;
   private unsubscribe?: () => void;
   // Read refreshes must not release a write guard. Retain guards across navigation
   // and account changes until the request settles and a fresh read reconciles it.
-  private operations = new Map<string, Operation>();
+  private operations: Map<string, Operation>;
   private clock: { server: number; started: number } | null = null;
   private deadlineTimer?: ReturnType<typeof setTimeout>;
 
@@ -83,9 +85,10 @@ export class TodayStore {
     private excuseAPI?: ExcuseAPI,
     private reminders?: ReminderMutations,
   ) {
-    this.excuseGroup = TodayStore.excuseGuards.get(sessions) ?? { locks: new Map(), activeStores: new Set() };
-    this.excuseLocks = this.excuseGroup.locks;
-    TodayStore.excuseGuards.set(sessions, this.excuseGroup);
+    this.guardGroup = TodayStore.writeGuards.get(sessions) ?? { operations: new Map(), locks: new Map(), activeStores: new Set() };
+    this.operations = this.guardGroup.operations;
+    this.excuseLocks = this.guardGroup.locks;
+    TodayStore.writeGuards.set(sessions, this.guardGroup);
   }
   snapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -108,6 +111,13 @@ export class TodayStore {
       }
     }
     return states;
+  }
+  private publishCompletionStates(owner: string, id: string) {
+    for (const store of this.guardGroup.activeStores) {
+      if (store.currentSession()?.user.id === owner && store.state.today?.occurrences.some(item => item.id === id)) {
+        store.publish({ ...store.state, completions: store.completionStates() });
+      }
+    }
   }
   private serverNow() {
     // Monotonic elapsed time avoids the device's wall clock/timezone. Measuring
@@ -205,7 +215,7 @@ export class TodayStore {
         this.publish({ ...this.state });
         void this.reload();
       }
-      for (const store of this.excuseGroup.activeStores) {
+      for (const store of this.guardGroup.activeStores) {
         if (store !== this && store.currentSession()?.user.id === session.user.id) {
           store.publish({ ...store.state });
           void store.reload();
@@ -240,14 +250,14 @@ export class TodayStore {
   start() {
     if (this.active) return;
     this.active = true;
-    this.excuseGroup.activeStores.add(this);
+    this.guardGroup.activeStores.add(this);
     this.unsubscribe = this.sessions.subscribe(this.acceptSession);
     this.acceptSession();
   }
   stop() {
     this.active = false;
-    this.excuseGroup.activeStores.delete(this);
-    this.context++;
+    this.guardGroup.activeStores.delete(this);
+    this.context = Symbol();
     this.readRevision++;
     this.unsubscribe?.();
     this.session = null;
@@ -262,7 +272,7 @@ export class TodayStore {
     this.session = session;
     this.readRevision++;
     if (!sameUser) {
-      this.context++;
+      this.context = Symbol();
       this.clock = null;
       this.publish(emptyState());
     }
@@ -291,7 +301,7 @@ export class TodayStore {
       if (!isCurrent()) return;
       if (today.occurrences.some(occurrence => occurrence.owner_id !== session.user.id)) throw new Error('Occurrence owner mismatch');
       const changedDate = this.state.today && (today.local_date !== this.state.today.local_date || today.timezone !== this.state.today.timezone);
-      if (changedDate) this.context++;
+      if (changedDate) this.context = Symbol();
       this.clock = { server: Date.parse(today.server_time), started };
       const excuses = changedDate ? {} : { ...this.state.excuses };
       for (const read of excuseReads) {
@@ -382,7 +392,7 @@ export class TodayStore {
     if (previous?.pending || previous?.refreshRequired) return;
     const operation: Operation = { context: this.context, pending: true, error: null, refreshRequired: false };
     this.operations.set(key, operation);
-    this.publish({ ...this.state, completions: this.completionStates() });
+    this.publishCompletionStates(session.user.id, item.id);
     const isCurrent = () => this.context === operation.context && this.currentSession()?.user.id === session.user.id
       && this.state.today?.occurrences.some(row => row.id === item.id && row.local_date === item.local_date);
     const ignoreStale = () => {
@@ -390,9 +400,7 @@ export class TodayStore {
       // but require a read before another write; never apply the old occurrence.
       this.operations.set(key, { ...operation, pending: false, refreshRequired: true, clearErrorOnRefresh: true,
         error: 'A previous update finished. Refresh Today before another change.' });
-      if (this.currentSession()?.user.id === session.user.id && this.state.today?.occurrences.some(row => row.id === item.id)) {
-        this.publish({ ...this.state, completions: this.completionStates() });
-      }
+      this.publishCompletionStates(session.user.id, item.id);
     };
     let refresh = false;
     try {
@@ -418,6 +426,7 @@ export class TodayStore {
       this.publish({ ...this.state, today: { ...today, occurrences: today.occurrences.map(row =>
         row.id === item.id && atLeastAsRecent(result.updated_at, row.updated_at) ? result : row) },
         loading: false, refreshing: false, completions: this.completionStates(), progressDrafts });
+      this.publishCompletionStates(session.user.id, item.id);
       refresh = true;
     } catch (error) {
       if (!isCurrent()) { ignoreStale(); return; }
@@ -436,7 +445,7 @@ export class TodayStore {
           ? 'Unable to verify your session. Retry, or open Settings to sign out and sign in again.'
         : 'Unable to change this occurrence. Please try again.';
       this.operations.set(key, { ...operation, pending: false, error: message, refreshRequired: !definite || refresh, clearErrorOnRefresh: !definite });
-      this.publish({ ...this.state, completions: this.completionStates() });
+      this.publishCompletionStates(session.user.id, item.id);
     }
     if (refresh && isCurrent()) await this.reload();
   };

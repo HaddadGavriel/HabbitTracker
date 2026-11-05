@@ -1,0 +1,10 @@
+{
+  "tests": "39",
+  "skipped": "0",
+  "failures": "0",
+  "errors": "0",
+  "time": "19.127",
+  "scope": "Isolated production reminder engine; before JS/Python dependency-only changes; not Expo bridge/APK/device verification",
+  "aar_sha256": "b11aef246fa913e67a7e84907538d83a49a720c711fe50e55e928d4385951de2",
+  "timestamp_utc": "2026-10-25T16:37:57.862Z"
+}

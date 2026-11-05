@@ -158,13 +158,16 @@ async function setup(t, options = {}) {
   const auth = { getSession: async () => ({ data: { session: options.session === undefined ? session() : options.session } }),
     onAuthStateChange: callback => { authEvent = callback; return { data: { subscription: { unsubscribe() {} } } }; },
     signOut: async () => ({ error: null }), refreshSession: async () => ({ data: { session: session() }, error: null }) };
-  const sessions = new SessionStore(auth, backend.api);
+  const sessions = new SessionStore(auth, backend.api, {
+    // Match SessionProvider's explicit local cleanup before Auth sign-out.
+    setSession: async s => { if (!s) await reminders.disable(); },
+  });
   const sync = () => { void reminders.setSession(sessions.snapshot()); };
   sessions.subscribe(sync); sync(); await sessions.start(); await settle();
   if (options.enable !== false) { await reminders.enable(); await settle(); }
   const stores = [];
   t.after(() => { stores.forEach(store => store.stop()); sessions.stop(); });
-  return { backend, native, storage, control, reminders, sessions, requests,
+  return { backend, native, storage, control, reminders, sessions, requests, auth,
     event: value => authEvent(value ? 'SIGNED_IN' : 'SIGNED_OUT', value),
     create: async (changes = {}) => {
       const store = new CreateHabitStore(sessions, backend.api.createHabit, () => {}, reminders);
@@ -328,6 +331,108 @@ test('process recovery reuses durable native ownership and reconciles once witho
   assert.equal(y.native.state.calls.filter(call => call.name === 'cancelAll').length, cancellations);
   assert.equal(y.backend.state.writes, writes);
   assert.equal(y.native.state.plan.owner_id, A);
+});
+
+async function offlineStartup(t) {
+  const x = await setup(t); await x.create();
+  const readProfile = x.backend.api.readProfile;
+  x.backend.api.readProfile = async () => { throw new Error('offline'); };
+  const plan = x.native.state.plan, lease = x.native.state.lease, before = x.native.state.calls.length;
+  const y = await setup(t, { backend: x.backend, native: x.native, storage: x.storage, enable: false });
+  assert.equal(y.sessions.snapshot().status, 'failure');
+  return { ...y, plan, lease, before, recover: () => { y.backend.api.readProfile = readProfile; } };
+}
+
+test('offline startup and repeated profile retries preserve same-owner opt-in until automatic recovery', async t => {
+  const x = await offlineStartup(t);
+  await x.reminders.refresh();
+  await x.sessions.retry(); await settle();
+  await x.reminders.refresh();
+  assert.equal(x.sessions.snapshot().status, 'failure');
+  assert.equal(x.storage.enabled, A);
+  assert.equal(x.native.state.plan, x.plan);
+  assert.equal(x.native.state.lease, x.lease);
+  assert.equal(x.native.state.calls.length, x.before, 'offline hydration leaves the durable schedule untouched');
+  assert.deepEqual(x.requests, [], 'no plan is requested until the profile is ready');
+  x.recover();
+  await x.sessions.retry(); await settle();
+  assert.equal(x.sessions.snapshot().status, 'ready');
+  assert.equal(x.reminders.snapshot().enabled, true);
+  assert.equal(x.reminders.snapshot().status, 'scheduled');
+  assert.equal(x.storage.enabled, A);
+  assert.equal(x.native.state.lease, x.lease);
+  assert.deepEqual(x.requests, [A]);
+  assert.ok(!x.native.state.calls.slice(x.before).some(call => call.name === 'cancelAll'));
+});
+
+test('profile failure fences an in-flight plan while preserving the same-owner cached schedule', async t => {
+  const x = await setup(t); await x.create();
+  const delayed = deferred(), plan = x.native.state.plan;
+  x.control.readPlan = () => delayed.promise;
+  const refresh = x.reminders.refresh(); await settle();
+  const before = x.native.state.calls.length;
+  await x.reminders.setSession({ ...x.sessions.snapshot(), status: 'failure', profile: null, error: 'offline' });
+  await x.reminders.refresh();
+  delayed.resolve(await x.backend.api.readPlan(session()));
+  await refresh; await settle();
+  assert.equal(x.storage.enabled, A);
+  assert.equal(x.native.state.plan, plan);
+  assert.equal(x.native.state.calls.length, before, 'neither a late plan nor foreground polling can change native work');
+  assert.equal(x.reminders.snapshot().busy, false);
+  x.control.readPlan = null;
+  await x.reminders.setSession(x.sessions.snapshot());
+  assert.equal(x.reminders.snapshot().status, 'scheduled');
+  assert.equal(x.reminders.snapshot().enabled, true);
+  assert.notEqual(x.native.state.plan, plan, 'the same session resumes reconciliation after profile recovery');
+});
+
+for (const outcome of ['success', 'failure']) test(`logout after offline startup revokes opt-in before Auth ${outcome}`, async t => {
+  const x = await offlineStartup(t), logout = deferred();
+  x.auth.signOut = () => logout.promise;
+  const pending = x.sessions.signOut(); await settle();
+  assert.equal(x.sessions.snapshot().status, 'loading');
+  assert.equal(x.storage.enabled, null);
+  assert.equal(x.native.state.plan, null);
+  assert.equal(x.native.state.owner, null);
+  logout.resolve({ error: outcome === 'failure' ? new Error('offline') : null });
+  await pending; await settle();
+  assert.equal(x.sessions.snapshot().status, outcome === 'failure' ? 'failure' : 'signed_out');
+  await x.reminders.refresh();
+  assert.equal(x.storage.enabled, null);
+  assert.equal(x.native.state.plan, null);
+  x.recover(); x.event(session()); await settle();
+  assert.equal(x.reminders.snapshot().enabled, false, 'profile recovery cannot undo explicit logout cleanup');
+  assert.equal(x.native.state.plan, null);
+});
+
+test('account switch during offline profile failure revokes A opt-in without enabling B or a later A login', async t => {
+  const x = await offlineStartup(t);
+  x.event(session(B)); await settle();
+  assert.equal(x.sessions.snapshot().status, 'failure');
+  assert.equal(x.sessions.snapshot().session.user.id, B);
+  assert.equal(x.storage.enabled, null);
+  assert.equal(x.native.state.plan, null);
+  assert.deepEqual(x.requests, []);
+  x.recover();
+  await x.sessions.retry(); await settle();
+  assert.equal(x.reminders.snapshot().enabled, false);
+  x.event(session()); await settle();
+  assert.equal(x.reminders.snapshot().enabled, false);
+  assert.equal(x.storage.enabled, null);
+  assert.equal(x.native.state.plan, null);
+});
+
+test('account deletion after offline profile failure revokes the saved preference and durable schedule', async t => {
+  const x = await offlineStartup(t);
+  await x.reminders.beforeAccountDeletion();
+  assert.equal(x.storage.enabled, null);
+  assert.equal(x.native.state.plan, null);
+  assert.equal(x.native.state.owner, null);
+  assert.equal(x.reminders.snapshot().status, 'off');
+  x.recover();
+  await x.sessions.retry(); await settle();
+  assert.equal(x.reminders.snapshot().enabled, false);
+  assert.deepEqual(x.requests, [], 'profile recovery cannot resurrect a deleted account schedule');
 });
 
 test('live sign-out cancels immediately while an old authenticated reconciliation is still reading', async t => {

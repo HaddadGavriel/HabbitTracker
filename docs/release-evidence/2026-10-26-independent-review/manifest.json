@@ -1,0 +1,26 @@
+{
+  "reviewed_base": "1853140e9a04db22ee164a21246d9b5428c2f567",
+  "reviewed_head": "292a8a66ea4a4ba8b31f485af410b55d7279ff0e",
+  "merge_commit": "29c6874d8d10cd0757675edb53f0e0450df267aa",
+  "reviewed_and_merge_tree": "10fbcbf1a1e426248838cd2f06383cb4a990d8dc",
+  "preserved_input_sha256": {
+    "mobile/package.json": "7f4fdb1da44e4abb34433586dbc13eb57374e150e50018282feb80d5fc1b46d2",
+    "mobile/package-lock.json": "e14b3908268e87c930a21a81868b003b4bc003a7ab7f827fdd5b8d9cf579bfd8",
+    "mobile/app.config.ts": "e80c3126580d27281287bfdd16c861dd486c3d16c88aa5737f33a0c992b65d6b",
+    "mobile/eas.json": "05ee2f95eefce5940ec080b8854231669497c82d8e7848817d860fb3b3143358",
+    ".github/workflows/dependency-audit.yml": "d9fae137051c08287a767521d503074533c99f6f4e7c635405c0d55d06fe999f",
+    "backend/requirements.txt": "06893e23aac7675969cacd749c6c405dec36f87bc607f55035b5bcd5dd87ba15",
+    "backend/requirements-dev.txt": "97f6c4de540107a5593177a66f9c9e5cfff1f72090e5dbc5482ba39871f0e228"
+  },
+  "artifact_sha256": {
+    "automated-checks.txt": "b9c72e0d20db2b6781994740e62b2ff97082e7bff63e644e8ef4bf50e4ea24b6",
+    "dependency-paths.txt": "3f98c9b1477d907dde650ec432fcfdf5c36620bc57a3667d0362a9740c4f17e9",
+    "dependency-probes.cjs": "81f4bf5d186f9bf17b5e4172e8737585509fcbbbcc096f8ad7129b931b3f687d",
+    "forge-reproduction.txt": "a29ef7f240b5c82115a8eb0d7a0d61383bc77c8d2ed7732b72731dd3a00a820d",
+    "npm-audit.json": "a179ee2ce58f615d2e60096537f9f6bdfc9efd49253329384c205f4cf75cb0d8",
+    "python-audit.json": "3b695b8d96da0c69168fbd11bd9fa8f47233612e5244166207a1cea84cc0ad3f",
+    "upstream-status.json": "1605ea1ef7582e0abc9f96bb91a13433ffc484d01a6259f8720593fd9eb91d28",
+    "zod-compatibility.txt": "6025c66ac995352e70fe7c98286741aaf2c01b2eb329faf0c26a2bd45cfe9863"
+  },
+  "scope": "Independent local verification plus inspected native CI; unchanged application/dependencies; no main merge or deployment"
+}

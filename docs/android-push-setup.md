@@ -4,7 +4,29 @@ The fixed Android application/package identifier is **`com.haddadgavriel.habittr
 
 This app targets **Expo SDK 57**. A development build is a custom debug app containing native notification code. The preview profile produces a directly installable APK. Neither workflow relies on Expo Go.
 
-## 1. Create Firebase configuration
+## Existing-project release
+
+For this repository's release, use the existing EAS project
+`4f31560d-6323-41f7-ae0a-f792a4814c98`, Android package, Firebase project and Android
+signing key. Follow the [release runbook](android-release-runbook.md). Do not run
+`eas init`, create a replacement Firebase/EAS project, or regenerate signing
+credentials for an existing release. Obtain the matching `google-services.json`
+from the existing Firebase Android app. With the release environment configured:
+
+```bash
+cd mobile
+npm ci
+npm test
+npm run typecheck
+npx expo-doctor
+```
+
+Dependency upgrades belong in a separately reviewed change; do not run
+`expo install --fix` or rewrite the lockfile as a release setup step. Sections
+1–2 below describe first-time bootstrap only. Continue at section 3 for release
+environment and credential verification, using the existing project identities.
+
+## 1. First-time bootstrap: create Firebase configuration
 
 1. Open [Firebase Console](https://console.firebase.google.com), choose **Add project**, and complete the wizard. Analytics is optional.
 2. On **Project overview**, choose **Add app → Android**.
@@ -13,7 +35,7 @@ This app targets **Expo SDK 57**. A development build is a custom debug app cont
 5. Open **Project settings → Cloud Messaging** and ensure **Firebase Cloud Messaging API (V1)** is enabled. Follow its Google Cloud Console link if Firebase asks you to enable it.
 6. Open **Project settings → Service accounts → Generate new private key**. Keep that service-account JSON outside the repository. This separate file is uploaded through EAS's Android credentials menu for FCM V1.
 
-## 2. Install tools, align SDK dependencies, and link EAS
+## 2. First-time bootstrap: install tools and link EAS
 
 Install Node.js 22.13 or newer, then run:
 
@@ -21,13 +43,14 @@ Install Node.js 22.13 or newer, then run:
 npm install --global eas-cli
 eas login
 cd mobile
-npm install
-npx expo install --fix
+npm ci
 npx expo-doctor
 eas init
 ```
 
-`npx expo install --fix` is Expo's dependency-alignment tool; it should report the committed React, React Native, Router, and Expo modules as compatible with SDK 57. During `eas init`, create or select the Expo project. Copy the project UUID it reports (also visible under **expo.dev → project → Project settings → Project ID**).
+Only during first-time bootstrap, `eas init` creates or selects the Expo project.
+Copy its UUID (also visible under **expo.dev → project → Project settings → Project ID**).
+For this existing repository, use the project ID above instead.
 
 The dynamic `mobile/app.config.ts` reads that UUID from `EXPO_PUBLIC_EAS_PROJECT_ID`. For subsequent local EAS commands in this shell, set it once.
 

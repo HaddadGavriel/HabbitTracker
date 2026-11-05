@@ -1,0 +1,8 @@
+{
+  "name": "decode-uri-component",
+  "version": "0.5.1-cjs.1",
+  "description": "CommonJS security backport of decode-uri-component 0.5.1 for Expo SDK 57",
+  "main": "index.cjs",
+  "license": "MIT",
+  "private": true
+}

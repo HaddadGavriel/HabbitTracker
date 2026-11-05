@@ -1,12 +1,22 @@
 # Habit Tracker — Android MVP release candidate
 
+For private testing on your Android phones, follow the complete
+[installation walkthrough](docs/install-on-android-phones.md). It covers the
+separate Supabase/Render test environment, existing Expo/Firebase credentials,
+APK build, installation and the first two-phone test session.
+
 This repository contains authenticated profiles, exact username lookup, friendships, private habit tracking, selective habit sharing, occurrence excuses with friend decisions, owner occurrence history, current streaks, friend-triggered push reminders, and integrated Android local habit reminders. Settings includes profile/timezone updates, notification controls, sign-out and recoverable permanent account deletion. Support diagnostics are optional and disabled by default. Backend contracts and PowerShell walkthroughs are in [`docs/friendships.md`](docs/friendships.md), [`docs/habits.md`](docs/habits.md), [`docs/occurrences.md`](docs/occurrences.md), [`docs/sharing.md`](docs/sharing.md), [`docs/excuses.md`](docs/excuses.md), [`docs/history.md`](docs/history.md), and [`docs/reminders.md`](docs/reminders.md).
 
 The app opens on **Today**. **Menu** consistently reaches **My habits**, **Friends**,
 **Friends’ habits**, **Pending decisions**, and **Settings**. This is a release
 candidate, not a claim of production/device verification. Start with the
 [release runbook](docs/android-release-runbook.md), [requirements checklist](docs/android-release-checklist.md)
-and [actual validation evidence](docs/android-release-validation.md).
+and [latest validation evidence](docs/release-evidence/2026-10-26-followup.md).
+
+Release remains blocked on two Expo toolchain advisories, live deletion-maintenance
+activation, an APK signed with the existing key, and physical-device acceptance.
+The current checkout prepares a bounded deletion cron with automatic deployments
+off; it does not deploy or run maintenance against a shared account database.
 
 ## Architecture
 

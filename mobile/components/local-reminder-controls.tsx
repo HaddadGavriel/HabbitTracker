@@ -9,7 +9,9 @@ export function LocalReminderControls() {
     <Text style={{ fontSize: 20, fontWeight: '600' }}>Habit reminders on this device</Text>
     <Text>Notification permission: {state.permission === 'unknown' ? 'Not checked' : state.permission === 'granted' ? 'Allowed' : 'Blocked'}</Text>
     <Text accessibilityLiveRegion="polite">{state.message}</Text>
-    {state.lastSuccess && <Text>Last successful schedule sync: {state.lastSuccess}</Text>}
+    {state.lastSuccess && <Text>Last successful schedule sync: {new Date(state.lastSuccess).toLocaleString()}</Text>}
+    {state.nextReminderAt && <Text>Next scheduled reminder: {new Date(state.nextReminderAt).toLocaleString()}</Text>}
+    {state.lastDeliveredAt && <Text>Last notification posted: {new Date(state.lastDeliveredAt).toLocaleString()}</Text>}
     <Button title="Enable habit reminders" disabled={state.busy || state.enabled} onPress={() => void localReminderService.enable()} />
     <Button title="Retry / resync reminders" disabled={state.busy} onPress={() => void localReminderService.refresh()} />
     <Button title="Disable habit reminders" disabled={!state.enabled && state.status !== 'error'} onPress={() => void localReminderService.disable()} />

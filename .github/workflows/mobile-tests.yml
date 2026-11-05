@@ -5,7 +5,16 @@ on:
     branches: [main]
 jobs:
   mobile:
-    runs-on: ubuntu-latest
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: mobile
+            os: ubuntu-latest
+          - name: mobile-windows
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: mobile

@@ -3,9 +3,9 @@ import { useRef, useState } from 'react';
 import { Text } from 'react-native';
 import { ApiError } from '../lib/api';
 import { profileInput } from '../lib/profile-input';
+import { deviceTimezone } from '../lib/timezone-suggestion';
 import { useSession } from '../lib/session';
 import { Field, Form, Loading, Message, styles } from '../components/form';
-function deviceTimezone() { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; } }
 export default function Onboarding() {
   const { store } = useSession();
   const [username, setUsername] = useState(''); const [displayName, setDisplayName] = useState(''); const [timezone, setTimezone] = useState(deviceTimezone);

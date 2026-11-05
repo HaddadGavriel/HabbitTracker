@@ -5,6 +5,8 @@ group = 'com.habbittracker.reminders'
 version = '1.0.0'
 android {
   namespace 'com.habbittracker.reminders'
+  // Ship the exact backend catalog as a Java resource in the AAR/APK.
+  sourceSets.main.resources.srcDir '../../../../backend/app/data'
   defaultConfig { versionCode 1; versionName '1.0.0'; consumerProguardFiles 'consumer-rules.pro' }
   compileOptions {
     coreLibraryDesugaringEnabled true

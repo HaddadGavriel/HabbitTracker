@@ -1,0 +1,91 @@
+npm-ci.log
+
+added 633 packages in 38s
+
+mobile-tests.log
+✔ midnight refresh clears target drafts and ignores previous-date success (100.562304ms)
+✔ midnight refresh clears target drafts and ignores previous-date failure (85.709025ms)
+✔ sign-out clears target drafts immediately and late progress cannot restore them (114.33122ms)
+✔ Home links to Today and its route is protected for ready accounts only (47.464609ms)
+ℹ tests 736
+ℹ suites 0
+ℹ pass 736
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 100991.14122
+
+typecheck.log
+
+> habit-tracker-infrastructure-proof@0.1.0 typecheck
+> tsc --noEmit
+
+
+backend-pg16.log
+........................................................................ [ 86%]
+........................................................................ [ 90%]
+........................................................................ [ 94%]
+........................................................................ [ 98%]
+......................sss                                                [100%]
+=============================== warnings summary ===============================
+../../review-venv/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /workspace/work/review-venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1750 passed, 3 skipped, 1 warning in 302.29s (0:05:02)
+
+backend-pg17.log
+........................................................................ [ 86%]
+........................................................................ [ 90%]
+........................................................................ [ 94%]
+........................................................................ [ 98%]
+......................sss                                                [100%]
+=============================== warnings summary ===============================
+../../review-venv/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /workspace/work/review-venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1750 passed, 3 skipped, 1 warning in 218.01s (0:03:38)
+
+timezone-contract.log
+...                                                                      [100%]
+3 passed in 3.28s
+
+jvm-tests.log
+Planner and journal tests passed (DST, replacement, bounded backlog, durable outbox and faults)
+
+http-smoke.log
+PASS: local Auth fixture → real HTTP API → real PostgREST → migrated PostgreSQL; owner/social authorization, idempotency and fake push recording. No device or live Auth/FCM claim.
+
+http-followup.log
+{"legacy_partial_patch": "pass", "explicit_timezone_patch": "pass", "production_adapter_scalar_claims_max_rows_10": "pass", "claims": [1000, 201], "pending": 1201, "environment": "disposable-local-only"}
+
+android-export-final.log
+node_modules/expo-router/assets/react-navigation/elements/close-icon.png (4 variations | 235B)
+node_modules/expo-router/assets/react-navigation/elements/search-icon.png (4 variations | 599B)
+node_modules/expo-router/assets/sitemap.png (465B)
+node_modules/expo-router/assets/unmatched.png (4.8KB)
+
+› android bundles (1):
+_expo/static/js/android/entry-8c7e7771b7aa5a715bd12c34e7dbe0a2.hbc (3.9MB)
+
+› Files (1):
+metadata.json (1.9KB)
+
+Exported: /workspace/work/android-export-final
+
+python-audit.log
+No known vulnerabilities found
+
+expo-compatibility.log
+Dependency validation is unreliable in offline-mode
+Dependencies are up to date
+
+Native Android module/Expo bridge verification: existing CI run 40319901114, job 121561868468.
+Checkout 38f3a8f776aeab6b0e6d1b40b4c3772efba07d36 and reviewed head share tree 10fbcbf1a1e426248838cd2f06383cb4a990d8dc.
+Isolated engine and full module AAR builds passed; AndroidAdapterTest: 39 tests, 0 failures/errors/skips.
+Full module AAR includes LocalRemindersModule.class and exact timezones-v1.txt.
+Not rerun locally: no Android SDK. No signed APK or device acceptance claim.

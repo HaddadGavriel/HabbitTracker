@@ -28,6 +28,7 @@ const view = compile('components/excuse-view.tsx', name => ({
 })[name]);
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const pending = () => ({ id: 'excuse-1', occurrence_id: 'occurrence-1', habit_id: 'habit-1', owner_id: 'owner',
+  owner: { user_id: 'owner', display_name: 'Alex Rivera', username: 'alex_reads' },
   explanation: 'Recovering from an injury', status: 'pending', decision_source: null, decided_by: null, decided_at: null,
   created_at: '2026-10-17T22:00:00Z', occurrence: {
     id: 'occurrence-1', habit_id: 'habit-1', owner_id: 'owner', local_date: '2026-10-17',
@@ -62,7 +63,7 @@ async function screen(overrides = {}) {
   } };
   const api = {
     listPendingExcuses: async () => overrides.list ? overrides.list() : row.status === 'pending' ? [row] : [],
-    readExcuse: async () => overrides.read ? overrides.read() : row,
+    readExcuse: async (...args) => overrides.read ? overrides.read(...args) : row,
     decideExcuse: async (s, id, decision) => {
       calls.push({ session: s, id, decision });
       return overrides.decide ? overrides.decide(s, id, decision) : row = settled(row, decision);
@@ -103,7 +104,7 @@ for (const decision of ['approve', 'reject']) {
   test(`pending screen displays stored older occurrence and requires explicit ${decision} confirmation`, async () => {
     const ui = await screen();
     for (const expected of ['Stored reading plan', '2026-10-17', 'America/Los_Angeles', '2026-10-18T07:00:00Z',
-      'Progress: 3 / 20 pages', 'Recovering from an injury', 'Submitted: 2026-10-17T22:00:00Z',
+      'Alex Rivera', '@alex_reads', 'Progress: 3 / 20 pages', 'Recovering from an injury', 'Submitted: 2026-10-17T22:00:00Z',
       'Decisions have no midnight deadline', 'first valid approval or rejection is final']) {
       assert.ok(ui.text().includes(expected), expected);
     }
@@ -134,6 +135,49 @@ for (const decision of ['approve', 'reject']) {
   });
 }
 
+for (const decision of ['approve', 'reject']) {
+  test(`identical habits from different friends identify the owner through ${decision} confirmation and accessible actions`, async () => {
+    const first = pending();
+    const second = { ...pending(), id: 'excuse-2', occurrence_id: 'occurrence-2', habit_id: 'habit-2', owner_id: 'other-owner',
+      // Even identical display names must remain distinguishable by username.
+      owner: { user_id: 'other-owner', display_name: 'Alex Rivera', username: 'alex_runs' },
+      occurrence: { ...pending().occurrence, id: 'occurrence-2', habit_id: 'habit-2', owner_id: 'other-owner' } };
+    let result = second;
+    const ui = await screen({
+      list: async () => result.status === 'pending' ? [first, result] : [first],
+      read: async (_session, id) => { assert.equal(id, second.occurrence_id); return result; },
+      decide: async (_session, id, action) => { assert.equal(id, second.id); return result = settled(second, action); },
+    });
+    const card = id => ui.render().find(node => node.type === 'View' && node.key === id);
+    const subject = row => `${row.owner.display_name} (@${row.owner.username}): ${row.occurrence.snapshot.name} on ${row.occurrence.local_date}`;
+    for (const row of [first, second]) {
+      assert.ok(text(card(row.id)).includes(`${row.owner.display_name} (@${row.owner.username})`));
+      for (const action of ['Approve', 'Reject']) {
+        const button = nodes(card(row.id)).find(node => node.type === 'Button' && node.props.title === `${action} excuse`);
+        assert.equal(button.props.accessibilityLabel, `${action} excuse for ${subject(row)}`);
+      }
+    }
+    const action = decision === 'approve' ? 'Approve' : 'Reject';
+    const confirmation = decision === 'approve' ? 'Confirm approval' : 'Confirm rejection';
+    const button = nodes(card(second.id)).find(node => node.type === 'Button' && node.props.title === `${action} excuse`);
+    button.props.onPress();
+    assert.equal(ui.calls.length, 0);
+    const warning = nodes(card(second.id)).find(node => node.type === 'Text' && node.props.accessibilityLiveRegion === 'polite');
+    assert.ok(text(warning).includes(`${action} excuse for ${subject(second)}?`));
+    assert.match(text(warning), /permanent and cannot be changed/);
+    assert.doesNotMatch(text(warning), /alex_reads/);
+    assert.equal(ui.button(confirmation).props.accessibilityLabel, `${confirmation} for ${subject(second)}. This decision is permanent.`);
+    assert.equal(ui.button('Cancel decision').props.accessibilityLabel, `Cancel decision for ${subject(second)}`);
+    await ui.press(confirmation);
+    assert.deepEqual(ui.calls.map(({ id, decision }) => ({ id, decision })), [{ id: second.id, decision }]);
+    assert.equal(ui.state().excuses[0].id, first.id);
+    assert.equal(ui.state().resolved.owner.username, 'alex_runs');
+    const finalCard = ui.render().find(node => node.type === 'View' && text(node).startsWith('Current final decision'));
+    assert.match(text(finalCard), /Alex Rivera \(@alex_runs\)/);
+    assert.ok(nodes(card(first.id)).some(node => node.type === 'Button' && node.props.title === 'Approve excuse'));
+  });
+}
+
 test('access loss at confirmation clears rendered explanation and every actionable decision button', async () => {
   let denied = false;
   const ui = await screen({ list: async () => denied ? [] : [pending()],
@@ -142,7 +186,7 @@ test('access loss at confirmation clears rendered explanation and every actionab
   ui.press('Approve excuse');
   const staleConfirm = ui.button('Confirm approval').props.onPress;
   await ui.press('Confirm approval');
-  assert.doesNotMatch(ui.text(), /Recovering from an injury|Stored reading plan|approval was saved/);
+  assert.doesNotMatch(ui.text(), /Recovering from an injury|Stored reading plan|Alex Rivera|alex_reads|approval was saved/);
   assert.match(ui.text(), /no longer accessible/);
   for (const title of ['Approve excuse', 'Reject excuse', 'Confirm approval', 'Confirm rejection', 'Cancel decision']) {
     assert.equal(ui.button(title), undefined, title);
@@ -157,7 +201,7 @@ test('backgrounding clears an open confirmation; foreground access denial cannot
   ui.press('Reject excuse');
   const staleConfirm = ui.button('Confirm rejection').props.onPress;
   ui.appState('background');
-  assert.doesNotMatch(ui.text(), /Recovering from an injury|Stored reading plan/);
+  assert.doesNotMatch(ui.text(), /Recovering from an injury|Stored reading plan|Alex Rivera|alex_reads/);
   assert.equal(ui.button('Confirm rejection'), undefined);
   denied = true;
   ui.appState('active'); await flush();

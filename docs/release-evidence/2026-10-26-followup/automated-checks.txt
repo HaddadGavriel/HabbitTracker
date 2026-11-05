@@ -1,0 +1,67 @@
+typecheck.log
+
+> habit-tracker-infrastructure-proof@0.1.0 typecheck
+> tsc --noEmit
+
+
+mobile-tests.log
+✔ midnight refresh clears target drafts and ignores previous-date success (42.519956ms)
+✔ midnight refresh clears target drafts and ignores previous-date failure (50.267709ms)
+✔ sign-out clears target drafts immediately and late progress cannot restore them (56.398348ms)
+✔ Home links to Today and its route is protected for ready accounts only (13.799554ms)
+ℹ tests 736
+ℹ suites 0
+ℹ pass 736
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 37347.982869
+
+backend-postgres16.log
+........................................................................ [ 86%]
+........................................................................ [ 90%]
+........................................................................ [ 94%]
+........................................................................ [ 98%]
+.........................                                                [100%]
+=============================== warnings summary ===============================
+../../pr33-review/backend/.venv/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /workspace/pr33-review/backend/.venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1753 passed, 1 warning in 148.28s (0:02:28)
+
+backend-postgres17.log
+........................................................................ [ 86%]
+........................................................................ [ 90%]
+........................................................................ [ 94%]
+........................................................................ [ 98%]
+.........................                                                [100%]
+=============================== warnings summary ===============================
+../../pr33-review/backend/.venv/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /workspace/pr33-review/backend/.venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1753 passed, 1 warning in 132.95s (0:02:12)
+
+http-smoke.log
+PASS: local Auth fixture → real HTTP API → real PostgREST → migrated PostgreSQL; owner/social authorization, idempotency and fake push recording. No device or live Auth/FCM claim.
+
+http-followup.log
+{"legacy_profile_name_patch": "pass", "explicit_supported_timezone_patch": "pass", "production_adapter_scalar_claims_with_postgrest_max_rows_10": "pass", "pending": 1201, "first_claim": 1000, "second_claim": 201, "environment": "disposable-local-only", "live_auth_called": false}
+
+android-export.log
+node_modules/expo-router/assets/react-navigation/elements/close-icon.png (4 variations | 235B)
+node_modules/expo-router/assets/react-navigation/elements/search-icon.png (4 variations | 599B)
+node_modules/expo-router/assets/sitemap.png (465B)
+node_modules/expo-router/assets/unmatched.png (4.8KB)
+
+› android bundles (1):
+_expo/static/js/android/entry-19362c44525913cc6428d6c54c6a6f79.hbc (3.9MB)
+
+› Files (1):
+metadata.json (1.9KB)
+
+Exported: /workspace/release-fix-evidence/android-export

@@ -156,8 +156,9 @@ currently valid recipients can decide even if the occurrence's deadline passed.
 
 When a profile or Auth account deletion can commit, related grants are removed
 through foreign-key cascades, whether the deleted user owned or received the
-share. Retained excuse decisions can [restrict deciding-profile deletion](excuses.md#persistence-and-concurrency).
-This milestone does not add profile, account, or permanent habit deletion endpoints.
+share. [Account deletion](account-deletion.md) anonymizes retained decisions by the
+deleted friend while preserving their outcomes and timestamps. There is no
+standalone permanent habit-deletion endpoint.
 
 ## Database and concurrency
 

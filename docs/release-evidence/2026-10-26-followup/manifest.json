@@ -1,0 +1,35 @@
+{
+  "base_commit": "1853140e9a04db22ee164a21246d9b5428c2f567",
+  "source_sha256": {
+    ".github/workflows/backend-tests.yml": "36360cf3f0e9bf977229bb36c0577adbd9d757d576fffcbe3dc50a024e034eff",
+    ".gitignore": "c68d7d7041e8a4f8b9aa6562c3b0860746535d6639118a4cb942b39a85af0aa6",
+    "README.md": "d0301adde549ae9b30f3bdab62aefa9927aad3d225fe0ecadfee800dc9ac1254",
+    "backend/app/deletion_maintenance.py": "14e80c4b20d804a3853893b10f987c53b13b24c6aaec463edb1d39d6bab66e01",
+    "backend/scripts/test-postgres.sh": "bef287723ef3d72a7d6b74171375c82f6d5cb8adbb079797bb90af1b0ad17ce4",
+    "backend/tests/test_deletion_maintenance.py": "27bb5f6f04f628f305a97341f00b693595eb2ed3e59e59ba6c82c5d1807864f0",
+    "backend/tests/test_deletion_maintenance_postgres.py": "4eaa82b41369b09b7601910e8415c6717cbbf23e16bcd2718f6b48427c3c87c8",
+    "backend/tests/test_timezone_contract.py": "fd584b31aed1587017b6595feb95c63ca24fb41109db6a00a7c023212a1a1c95",
+    "docs/account-deletion.md": "22a256e0bd326db0a536e4d0b0f2ab445e6343932b104b84b0b536079a6a6fcc",
+    "docs/android-push-setup.md": "38b824857ffb431e9b9e15bd78b84a5097a745be0de83e77c3e04438c47ab0bd",
+    "docs/android-release-checklist.md": "c272b593837e9d488b2de09830b62c5dcbeef72b47c83da325d551a48a663ae7",
+    "docs/android-release-runbook.md": "34e2f1deba1dce4930f701c402d9164149e2b26aac7a675d57de28def0b01763",
+    "docs/android-release-validation.md": "7ed5d356240c29ec77093ed2b1ac09bdadf4c7ebefc6eec88741e92ef893d318",
+    "docs/timezone-contract.md": "a2e7df974fd8526722c10d73a827b4d2f99e30ef59c8e518ed26a9412db3e170",
+    "mobile/app/onboarding.tsx": "c662f168c911ba0c9eb3100cd367d8b4a683a5d9c57641cf37a0a853e9ccf693",
+    "mobile/app/settings.tsx": "74d046579c3e857fe87ee93b3fcb51fbbc6f82199949783431a6b0254dd1d480",
+    "mobile/lib/api.ts": "f4c2642e9e4566d843434ce088923aac346345a3ced8926d05261c2af051cbc5",
+    "mobile/lib/profile-input.ts": "32c7e7010e6a21d99e8b83745c651ed4fe4ae1e9f266a0714b2d7e3d108d74a5",
+    "mobile/lib/session-store.ts": "85f3114b7d5dbfed8a794f469f9ad032957b20b174725085d0df722085a64939",
+    "mobile/lib/timezone-aliases.json": "bbd8d3b3e3e094331a9ccf4a596f8139e524d113357b77d304cc86fff18c7081",
+    "mobile/lib/timezone-suggestion.ts": "149291065b0763ea4a80a88ca898e47427d9ab25cbf90051faf7594fbd8e3ca4",
+    "mobile/tests/account-deletion.test.cjs": "8e7b84a8ee6d40a691086f45a8f8a75059ab5d86c168a54c3054f7629878fff0",
+    "mobile/tests/profile-editing.test.cjs": "a50c2c9f24a89e898d0970caaaeb5db45263396d8b3ae7607acf2c2a3172cd69",
+    "mobile/tests/settings-recovery.test.cjs": "1fca49930da7314dd35d022b1554696312b902fe3af83a1428acc12b48b3f3d7",
+    "supabase/migrations/20261026063642_fair_deletion_maintenance.sql": "14f260ff99e669f5074a631335c9405e463760723356c02e0aacdeff79760d8e"
+  },
+  "artifact_sha256": {
+    "npm-audit.json": "a179ee2ce58f615d2e60096537f9f6bdfc9efd49253329384c205f4cf75cb0d8",
+    "automated-checks.txt": "5c46b75b7045fc98e38e93d82d03053c0a0235b0c2d4e92bb373ecbc2783249d"
+  },
+  "scope": "precommit local validation; no production mutation or signed device acceptance"
+}

@@ -17,7 +17,7 @@ from test_sharing_postgres import befriend, grant, ordered_rpcs, remove, revoke,
 
 pytestmark = pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL is not configured")
 
-EXCUSE_FIELDS = {"id", "occurrence_id", "habit_id", "owner_id", "explanation", "status",
+EXCUSE_FIELDS = {"id", "occurrence_id", "habit_id", "owner_id", "owner", "explanation", "status",
                  "decision_source", "decided_by", "decided_at", "created_at", "occurrence"}
 
 
@@ -333,6 +333,39 @@ def test_pending_list_includes_older_dates_and_multiple_owners_in_deterministic_
     assert pending(friend) == [newest]
     lifecycle("archive", first, h1["id"])
     assert pending(friend) == []
+
+
+@pytest.mark.parametrize("decision", ["approve", "reject"])
+def test_identical_habits_include_current_authorized_owner_identity(users, clock, decision):
+    first, second, friend, outsider = users
+    h1, row1 = setup_shared(first, friend)
+    _, row2 = setup_shared(second, friend)
+    e1, e2 = submit(first, row1["id"]), submit(second, row2["id"])
+    identities = {}
+    for owner, username in [(first, "alex_reads"), (second, "alex_runs")]:
+        # Names are current public profile data, not snapshots taken at submission.
+        execute("update public.profiles set display_name='Alex Rivera', username=%s where user_id=%s", (username, owner))
+        identities[str(owner)] = {"user_id": str(owner), "display_name": "Alex Rivera", "username": username}
+    listed = pending(friend)
+    assert {row["id"] for row in listed} == {e1["id"], e2["id"]}
+    assert listed[0]["occurrence"]["snapshot"] == listed[1]["occurrence"]["snapshot"]
+    assert listed[0]["occurrence"]["local_date"] == listed[1]["occurrence"]["local_date"]
+    for row in listed:
+        assert set(row) == EXCUSE_FIELDS
+        assert row["owner"] == identities[row["owner_id"]]
+        assert read_excuse(friend, row["occurrence_id"])["owner"] == row["owner"]
+        assert read_excuse(row["owner_id"], row["occurrence_id"])["owner"] == row["owner"]
+        assert read_excuse(outsider, row["occurrence_id"]) is None
+    assert pending(outsider) == []
+    result = decide(friend, e2["id"], decision)
+    assert result["owner"] == identities[str(second)]
+    assert result["status"] == ("approved" if decision == "approve" else "rejected")
+    assert read_excuse(friend, row1["id"])["status"] == "pending"
+    assert [row["id"] for row in pending(friend)] == [e1["id"]]
+    revoke(first, h1["id"], friend)
+    assert pending(friend) == []
+    assert read_excuse(friend, row1["id"]) is None
+    assert decide(friend, e1["id"]) is None
 
 
 def test_only_valid_grants_tied_to_current_accepted_friendships_count_as_shared(users, clock):

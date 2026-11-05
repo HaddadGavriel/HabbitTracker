@@ -80,7 +80,7 @@ function settings() {
     '../components/form': { Field:'Field', Form:'Form', Message:'Message', styles:{} },
     '../components/notification-controls': { NotificationControls:'NotificationControls' },
     '../components/account-deletion-gate': { useAccountDeletion: () => ({ begin: async (...args) => calls.push(args) }) },
-    '../lib/api': { ApiError: class extends Error {} }, '../lib/profile-input': { profileInput:x=>x },
+    '../lib/api': { ApiError: class extends Error {} }, '../lib/profile-input': { profileUpdateInput:x=>x },
     '../lib/session': { useSession: () => ({ profile:{username:'alice',display_name:'Alice',timezone:'UTC'},session:{user:{id:'validated-user',email:'a@example.com'}},store:{} }) },
   };
   const Settings = compile('app/settings.tsx', name => { assert.ok(modules[name],name); return modules[name]; }).default;
@@ -104,7 +104,7 @@ test('real Settings destructive controls require exact phrase, mask password and
 });
 test('deleted decision maker is accepted only with null identity', () => {
   const { validateExcuse }=compile('lib/excuse-detail-store.ts', name => name==='./api' ? {ApiError:class extends Error {}} : {});
-  const row={id:'e',explanation:'Saved',status:'approved',occurrence_id:'o',owner_id:'a',habit_id:'h',decision_source:'deleted_friend',decided_by:null,decided_at:'2026-10-22T12:00Z',occurrence:{id:'o',owner_id:'a',habit_id:'h',state:'excused',completed:false}};
+  const row={id:'e',explanation:'Saved',status:'approved',occurrence_id:'o',owner_id:'a',owner:{user_id:'a',display_name:'Owner',username:'owner'},habit_id:'h',decision_source:'deleted_friend',decided_by:null,decided_at:'2026-10-22T12:00Z',occurrence:{id:'o',owner_id:'a',habit_id:'h',state:'excused',completed:false}};
   assert.doesNotThrow(()=>validateExcuse(row));
   assert.throws(()=>validateExcuse({...row,decided_by:'fake-profile'}));
 });

@@ -4,9 +4,12 @@ import { useFocusEffect } from 'expo-router';
 import { ActivityIndicator, AppState, ScrollView, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { styles } from '../components/form';
 import { ExcuseView } from '../components/excuse-view';
-import { decideExcuse, listPendingExcuses, readExcuse } from '../lib/api';
+import { decideExcuse, listPendingExcuses, readExcuse, type ExcuseResult } from '../lib/api';
 import { PendingExcusesStore } from '../lib/pending-excuses-store';
 import { useSession } from '../lib/session';
+
+const decisionSubject = (excuse: ExcuseResult) =>
+  `${excuse.owner.display_name} (@${excuse.owner.username}): ${excuse.occurrence.snapshot.name} on ${excuse.occurrence.local_date}`;
 
 export default function PendingExcuses() {
   const { store: sessions } = useSession();
@@ -32,22 +35,26 @@ export default function PendingExcuses() {
     {refreshRequired && <Text style={styles.message}>Current access and the stored decision must be checked before another action. Retry refreshing.</Text>}
     {resolved && <View style={localStyles.card}>
       <Text accessibilityRole="header" style={styles.label}>Current final decision</Text>
-      <ExcuseView excuse={resolved} occurrence={resolved.occurrence} />
+      <ExcuseView excuse={resolved} occurrence={resolved.occurrence} owner={resolved.owner} />
     </View>}
     {hasLoaded && !loading && !error && !excuses.length && <Text style={styles.message}>No excuses currently need your decision. Archived habits and excuses you can no longer access are hidden.</Text>}
     {excuses.map(excuse => <View key={excuse.id} style={localStyles.card}>
-      <ExcuseView excuse={excuse} occurrence={excuse.occurrence} />
+      <ExcuseView excuse={excuse} occurrence={excuse.occurrence} owner={excuse.owner} />
       {confirmation?.excuse === excuse ? <View style={localStyles.confirmation}>
         <Text accessibilityLiveRegion="polite" style={styles.message}>
-          {confirmation.decision === 'approve' ? 'Approve this excuse? The occurrence will be excused.' : 'Reject this excuse? The occurrence will be missed.'} The first valid decision is permanent and cannot be changed by you, another friend, or the owner. Stored progress is preserved.
+          {confirmation.decision === 'approve'
+            ? `Approve excuse for ${decisionSubject(excuse)}? The occurrence will be excused.`
+            : `Reject excuse for ${decisionSubject(excuse)}? The occurrence will be missed.`} The first valid decision is permanent and cannot be changed by you, another friend, or the owner. Stored progress is preserved.
         </Text>
         <Button title={confirmation.decision === 'approve' ? 'Confirm approval' : 'Confirm rejection'}
+          accessibilityLabel={`${confirmation.decision === 'approve' ? 'Confirm approval' : 'Confirm rejection'} for ${decisionSubject(excuse)}. This decision is permanent.`}
           onPress={() => store.confirmDecision(confirmation)} disabled={disabled} />
-        <Button title="Cancel decision" onPress={() => store.cancelDecision(confirmation)} />
+        <Button title="Cancel decision" accessibilityLabel={`Cancel decision for ${decisionSubject(excuse)}`}
+          onPress={() => store.cancelDecision(confirmation)} />
       </View> : <>
-        <Button title="Approve excuse" accessibilityLabel={`Approve excuse for ${excuse.occurrence.snapshot.name} on ${excuse.occurrence.local_date}`}
+        <Button title="Approve excuse" accessibilityLabel={`Approve excuse for ${decisionSubject(excuse)}`}
           onPress={() => store.requestDecision(excuse, 'approve')} disabled={disabled} />
-        <Button title="Reject excuse" accessibilityLabel={`Reject excuse for ${excuse.occurrence.snapshot.name} on ${excuse.occurrence.local_date}`}
+        <Button title="Reject excuse" accessibilityLabel={`Reject excuse for ${decisionSubject(excuse)}`}
           onPress={() => store.requestDecision(excuse, 'reject')} disabled={disabled} />
       </>}
     </View>)}

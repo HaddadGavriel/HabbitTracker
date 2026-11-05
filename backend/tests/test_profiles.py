@@ -1,5 +1,6 @@
 from copy import deepcopy
 from datetime import datetime, timezone
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -110,6 +111,25 @@ def test_missing_existing_auth_user_profile_is_normal():
         assert response.status_code == 404 and code(response) == "profile_not_found"
         assert client.patch("/profiles/me", json={"display_name": "Name"}).status_code == 404
         assert client.get("/profiles/search?username=somebody").status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("legacy_zone", ["EST", "HST", "ROC", "Factory", "localtime", "posix/UTC", "right/UTC", "Mars/Olympus"])
+def test_unsupported_existing_profile_stays_readable_and_can_be_repaired(legacy_zone):
+    database = ProfileDatabase()
+    database.rows["user-1"] = database.row("user-1", "owner") | {"timezone": legacy_zone}
+    client = client_for("user-1", database)
+    try:
+        response = client.get("/profiles/me")
+        assert response.status_code == 200 and response.json()["timezone"] == legacy_zone
+        renamed = client.patch("/profiles/me", json={"display_name": "New name"})
+        assert renamed.status_code == 200 and renamed.json()["timezone"] == legacy_zone
+        assert client.patch("/profiles/me", json={"timezone": legacy_zone}).status_code == 422
+        assert database.rows["user-1"]["timezone"] == legacy_zone
+        repaired = client.patch("/profiles/me", json={"timezone": "UTC"})
+        assert repaired.status_code == 200 and repaired.json()["timezone"] == "UTC"
+        assert client.get("/profiles/me").json()["timezone"] == "UTC"
     finally:
         app.dependency_overrides.clear()
 

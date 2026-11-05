@@ -4,12 +4,37 @@ from test_occurrences_postgres import clock, zone, occurrences, mutation
 from test_habits_postgres import create, patch, lifecycle, CONFIG, TARGET
 from test_excuses_postgres import submit, decide
 from test_sharing_postgres import befriend, grant
+from app.timezones import SUPPORTED_TIMEZONES
 
 pytestmark = pytest.mark.skipif(not URL, reason='TEST_DATABASE_URL is not configured')
 
 
 def plan(owner):
     return service('select public.get_local_reminder_plan(%s)', (owner,), True)[0][0]
+
+
+def test_timezone_contract_is_available_to_database_scheduling():
+    database_zones = {row[0] for row in execute('select name from pg_catalog.pg_timezone_names', fetch=True)}
+    assert SUPPORTED_TIMEZONES <= database_zones
+
+
+def test_legacy_timezone_repair_preserves_unsupported_occurrence_snapshots(users, clock):
+    owner = users[0]
+    zone(owner, 'Factory')  # Accepted by Python/Postgres; unsupported by native ZoneId.
+    create(owner, CONFIG | {'reminder_times': ['08:00']})
+    original = occurrences(owner)[0]
+    assert original['timezone'] == 'Factory'
+    assert plan(owner)['effective'][0]['timezone'] == 'Factory'
+    zone(owner, 'UTC')
+    corrected = plan(owner)
+    assert corrected['timezone'] == 'UTC'
+    assert corrected['effective'][0]['timezone'] == 'Factory'
+    assert corrected['effective'][0]['closes_at'] == original['closes_at']
+    clock('2026-03-02 06:00+00')
+    fresh = plan(owner)
+    assert all(row['timezone'] == 'UTC' for row in fresh['effective'])
+    stored = next(row for row in occurrences(owner) if row['id'] == original['id'])
+    assert stored['timezone'] == original['timezone'] and stored['closes_at'] == original['closes_at']
 
 
 def test_snapshots_skipped_today_and_archive(users, clock):

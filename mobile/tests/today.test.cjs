@@ -132,6 +132,7 @@ async function screen(readToday, readProfile = async s => profile(s.user.id), in
     list,
     button: (title, id) => (id ? row(id) : render()).find(node => node.type === 'Button' && node.props.title === title),
     input: (id = 'occurrence-a') => row(id).find(node => node.type === 'TextInput'),
+    remount: async () => { cleanup(); store = undefined; render(); cleanup = focus(); await flush(); },
     event: value => authEvent('SIGNED_IN', value),
     leave: () => cleanup(),
     focus: () => { cleanup = focus(); },
@@ -869,6 +870,136 @@ for (const outcome of ['success', 'failure']) test(`navigation ignores stale com
   assert.ok(!ui.button('Complete').props.disabled);
   assert.equal(ui.button('Refresh Today'), undefined);
 });
+
+for (const kind of ['completion', 'undo', 'progress']) for (const outcome of ['success', 'failure']) {
+  test(`remounted ${kind} keeps its guard through out-of-order reads and late ${outcome}`, async () => {
+    const mutation = deferred(), oldRead = deferred(), freshRead = deferred();
+    let reads = 0;
+    const writes = [];
+    const initial = kind === 'progress' ? targetOccurrence() : kind === 'undo' ? completedOccurrence() : occurrence();
+    const confirmed = kind === 'progress' ? targetOccurrence({ progress: 7, updated_at: '2026-10-10T12:02:00Z' })
+      : occurrence({ completed: kind === 'completion', state: kind === 'completion' ? 'completed' : 'in_progress', updated_at: '2026-10-10T12:02:00Z' });
+    const write = (s, id, value) => {
+      writes.push({ s, id, value });
+      return writes.length === 1 ? mutation.promise : Promise.reject(new ApiError('validation', 422, 'validation_error'));
+    };
+    const ui = await screen(() => {
+      reads++;
+      if (reads === 3) return oldRead.promise;
+      if (reads === 4) return Promise.reject(new ApiError('offline', null, 'network_error'));
+      if (reads === 5) return freshRead.promise;
+      return Promise.resolve(openToday({ occurrences: [initial] }));
+    }, undefined, undefined, write, write);
+    const title = kind === 'progress' ? 'Save progress' : kind === 'undo' ? 'Undo' : 'Complete';
+    if (kind === 'progress') ui.input().props.onChangeText('7');
+    const captured = ui.button(title).props.onPress;
+    const originalStore = ui.store();
+    const pending = captured();
+    await ui.remount();
+    assert.notEqual(ui.store(), originalStore, 'remount creates a separate store instance');
+    assert.equal(originalStore.snapshot().today, null);
+    assert.equal(Object.keys(originalStore.snapshot().progressDrafts).length, 0);
+    assert.equal(ui.button(title).props.disabled, true);
+    assert.equal(ui.store().snapshot().completions[initial.id].pending, true);
+    assert.equal(Object.keys(ui.store().snapshot().progressDrafts).length, 0);
+    if (kind === 'progress') {
+      assert.equal(ui.input().props.value, '0', 'drafts do not survive remount');
+      assert.equal(ui.input().props.editable, false);
+      ui.input().props.onChangeText('99');
+      assert.equal(ui.input().props.value, '0');
+    }
+    await captured();
+    await ui.button(title).props.onPress();
+    assert.equal(writes.length, 1, 'a remounted screen cannot dispatch a competing write');
+    const refreshing = ui.list().onRefresh();
+    if (outcome === 'success') mutation.resolve(confirmed);
+    else mutation.reject(new ApiError('old private failure', null, 'request_timeout'));
+    await pending;
+    assert.equal(ui.store().snapshot().completions[initial.id].pending, false, 'settlement wakes the new store');
+    assert.equal(ui.store().snapshot().completions[initial.id].refreshRequired, true);
+    assert.equal(ui.list().data[0], initial, 'a previous store cannot publish its result');
+    assert.equal(originalStore.snapshot().today, null);
+    assert.doesNotMatch(ui.texts().join(' '), /old private failure/);
+    oldRead.resolve(openToday({ occurrences: [initial] }));
+    await refreshing;
+    assert.equal(ui.button(title).props.disabled, true, 'a read dispatched before settlement cannot release the guard');
+    await ui.button(title).props.onPress();
+    assert.equal(writes.length, 1);
+    await ui.button('Refresh Today').props.onPress();
+    assert.equal(ui.button(title).props.disabled, true, 'a failed fresh read cannot release the guard');
+    const refreshed = ui.button('Refresh Today').props.onPress();
+    freshRead.resolve(openToday({ occurrences: [confirmed] }));
+    await refreshed;
+    assert.equal(reads, 5);
+    assert.equal(ui.list().data[0], confirmed);
+    assert.equal(ui.button('Refresh Today'), undefined);
+    const nextTitle = kind === 'progress' ? title : kind === 'completion' ? 'Undo' : 'Complete';
+    assert.ok(!ui.button(nextTitle).props.disabled);
+    assert.equal(writes.length, 1, 'reconciliation never repeats the old write');
+    if (kind === 'progress') ui.input().props.onChangeText('3');
+    await ui.button(nextTitle).props.onPress();
+    assert.equal(writes.length, 2, 'a fresh read enables an intentional new write');
+    assert.equal(writes[1].value, kind === 'progress' ? 3 : kind === 'undo');
+    ui.leave();
+  });
+}
+
+for (const failure of ['validation', 'definite']) {
+  test(`remount discards ${failure} errors belonging to the previous store context`, async () => {
+    const ui = await screen(async () => openToday({ occurrences: [targetOccurrence()] }),
+      undefined, undefined, undefined, async () => { throw new ApiError('validation', 422, 'validation_error'); });
+    ui.input().props.onChangeText(failure === 'validation' ? 'invalid' : '7');
+    await ui.button('Save progress').props.onPress();
+    assert.ok(ui.store().snapshot().completions['occurrence-a'].error);
+    assert.equal(ui.store().snapshot().completions['occurrence-a'].refreshRequired, false);
+    await ui.remount();
+    assert.equal(Object.keys(ui.store().snapshot().completions).length, 0);
+    assert.equal(ui.input().props.value, '0');
+    assert.ok(!ui.button('Save progress').props.disabled);
+    ui.leave();
+  });
+}
+
+for (const kind of ['completion', 'progress']) for (const outcome of ['success', 'failure']) {
+  test(`remounted ${kind} guards isolate accounts with the same occurrence ID after late ${outcome}`, async () => {
+    const firstWrite = deferred(), secondWrite = deferred();
+    const writes = [];
+    let reads = 0;
+    const row = owner_id => kind === 'progress' ? targetOccurrence({ owner_id }) : occurrence({ owner_id });
+    const confirmed = owner_id => ({ ...row(owner_id), progress: kind === 'progress' ? 7 : 0,
+      completed: kind === 'completion', state: kind === 'completion' ? 'completed' : 'in_progress', updated_at: '2026-10-10T12:02:00Z' });
+    const write = (s, id, value) => { writes.push({ s, id, value }); return s.user.id === 'a' ? firstWrite.promise : secondWrite.promise; };
+    const ui = await screen(async s => { reads++; return openToday({ occurrences: [row(s.user.id)] }); },
+      undefined, undefined, write, write);
+    const title = kind === 'progress' ? 'Save progress' : 'Complete';
+    if (kind === 'progress') ui.input().props.onChangeText('7');
+    const captured = ui.button(title).props.onPress;
+    const firstPending = captured();
+    await ui.remount();
+    ui.event(session('b'));
+    await flush();
+    assert.equal(ui.list().data[0].owner_id, 'b');
+    assert.equal(Object.keys(ui.store().snapshot().completions).length, 0);
+    assert.equal(Object.keys(ui.store().snapshot().progressDrafts).length, 0);
+    assert.ok(!ui.button(title).props.disabled);
+    await captured();
+    if (kind === 'progress') ui.input().props.onChangeText('7');
+    const secondPending = ui.button(title).props.onPress();
+    assert.deepEqual(writes.map(({ s }) => s.user.id), ['a', 'b']);
+    const accepted = ui.store().snapshot(), readCount = reads;
+    if (outcome === 'success') firstWrite.resolve(confirmed('a'));
+    else firstWrite.reject(new ApiError('old private failure', null, 'network_error'));
+    await firstPending;
+    assert.equal(ui.store().snapshot(), accepted, 'account A settlement cannot change account B state');
+    assert.equal(reads, readCount, 'account A settlement cannot start an account B read');
+    assert.equal(ui.button(title).props.disabled, true, 'account B retains its own pending guard');
+    secondWrite.resolve(confirmed('b'));
+    await secondPending;
+    assert.ok(!ui.button(title).props.disabled);
+    assert.equal(ui.list().data[0].owner_id, 'b');
+    ui.leave();
+  });
+}
 
 for (const outcome of ['success', 'failure']) test(`account change ignores stale completion ${outcome} even with a repeated occurrence ID`, async () => {
   const mutation = deferred();

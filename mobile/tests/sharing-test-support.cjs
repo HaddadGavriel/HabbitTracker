@@ -6,7 +6,8 @@ function compile(path, dependencies) {
   const exports = {};
   vm.runInNewContext(ts.transpileModule(readFileSync(`${__dirname}/../${path}`, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
-  }).outputText, { exports, Error, process: { env: {} }, require: dependencies });
+  }).outputText, { exports, Error, setTimeout: (...args) => setTimeout(...args),
+    clearTimeout: timer => clearTimeout(timer), process: { env: {} }, require: dependencies });
   return exports;
 }
 const cache = {};

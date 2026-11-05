@@ -26,6 +26,20 @@
       "android": {
         "buildType": "app-bundle"
       }
+    },
+    "internal-testing": {
+      "extends": "preview",
+      "credentialsSource": "remote",
+      "environment": "preview",
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "autoIncrement": true,
+      "env": {
+        "HABITTRACKER_INTERNAL_BUILD": "1",
+        "EXPO_PUBLIC_EAS_PROJECT_ID": "4f31560d-6323-41f7-ae0a-f792a4814c98"
+      }
     }
   }
 }

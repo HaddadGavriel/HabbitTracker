@@ -94,6 +94,7 @@ def test_api_through_real_adapter_uses_one_atomic_rpc(monkeypatch, method, path,
             assert response.status_code == response_status
             row = response.json()[0] if rpc == "list_pending_excuses" else response.json()
             assert row["id"] == EID and row["occurrence"]["state"] == "justification_pending"
+            assert row["owner"] == EXCUSE["owner"]
         assert len(requests) == 1
     finally:
         app.dependency_overrides.clear()
