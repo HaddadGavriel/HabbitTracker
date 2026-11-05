@@ -7,30 +7,36 @@ required for this change. Keep the existing backend, EAS project and signing key
 
 ## Build and install
 
-From your existing full repository checkout, fetch the fix branch:
+From your existing full repository checkout, update the consolidated release branch:
 
 ```bash
 git fetch origin
-git switch codex/fix-local-reminder-delivery
+git switch codex/release-hardening-and-evidence
 git pull --ff-only
 git log -1 --oneline
 cd mobile
 npm ci
 ```
 
-For the existing EAS internal-testing installation, reuse its configured preview
-environment and existing remote signing credentials:
+Run the same EAS build command and profile that produced your installed APK.
+These fixes require a new APK, but no change to your build workflow, environment
+or signing key.
+
+If you used the repository's existing internal-testing wrapper, its command is
+unchanged from the [installation guide](install-on-android-phones.md):
 
 ```bash
-bash scripts/build-internal-apk.sh > ../reminder-build-result.json
+bash scripts/build-internal-apk.sh > ../internal-build-result.json
 ```
 
 Run this in Git Bash on Windows or Bash on macOS/Linux. If EAS is not logged in,
 run `npx --yes eas-cli@26.0.0 login` on your computer, then repeat. The wrapper
 checks the existing isolated testing configuration and waits for the APK build.
-It does not change production services or submit to Google Play. If your installed
-APK used another EAS profile, build with that same profile/environment/signing key
-instead; do not change which backend the app uses just for this update.
+It runs an EAS Android build with profile `internal-testing`, `--non-interactive`,
+`--freeze-credentials`, `--wait` and `--json`. Redirecting to a differently named
+JSON file only changes where the build result is saved. If you previously invoked
+EAS directly, continue using that command with the same profile/environment and
+signing key. The wrapper is not a new requirement for these fixes.
 
 Open the successful build's APK download link on the phone and install the update
 over the existing app. Alternatively, download that APK and run:

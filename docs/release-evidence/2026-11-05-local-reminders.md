@@ -1,8 +1,9 @@
 # Local reminder audit and repair
 
 Audited base: `7769a75d62a02be617599fd4377039c603443d78`,
-`codex/release-hardening-and-evidence`. Fix branch:
-`codex/fix-local-reminder-delivery`. These results supersede the earlier audit
+`codex/release-hardening-and-evidence`. The fixes are consolidated into that
+release branch through [PR #36](https://github.com/HaddadGavriel/HabbitTracker/pull/36).
+These results supersede the earlier audit
 against `915333f`; they apply to the installed-build source revision identified
 by the user. The phone's installed APK has not been independently inspected.
 
@@ -54,7 +55,7 @@ delivery. No signed APK or EAS build has been produced in this environment.
 
 ## Installed-phone acceptance
 
-Build a fresh EAS APK from the fix branch using the existing profile/environment
+Build a fresh EAS APK from `codex/release-hardening-and-evidence` using the existing profile/environment
 and signing key, then install over the existing app. A JavaScript reload or OTA
 update cannot install these native changes. Follow the
 [phone regression checklist](../local-reminders-phone-test.md), record the source
